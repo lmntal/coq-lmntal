@@ -44,13 +44,15 @@ Coercion GAtom : Atom >-> Graph.
 
 Declare Custom Entry lmntal.
 Declare Scope lmntal_scope.
-Notation "{{ e }}" := e (at level 0, e custom lmntal at level 99, only parsing) : lmntal_scope.
+Notation "{{ e }}" := e (at level 0, e custom lmntal at level 99) : lmntal_scope.
 Notation "( x )" := x (in custom lmntal, x at level 99) : lmntal_scope.
 Notation "x" := x (in custom lmntal at level 0, x constr at level 0) : lmntal_scope.
 Notation "p ( x , .. , y )" := (AAtom p (cons x .. (cons y nil) .. ))
                   (in custom lmntal at level 0,
                   p constr at level 0, x constr at level 9,
                   y constr at level 9) : lmntal_scope.
+Notation "p ()" := (AAtom p nil) (in custom lmntal at level 0,
+                                  p constr at level 0) : lmntal_scope.
 Notation "x = y" := (AAtom "=" [x;y]) (in custom lmntal at level 40, left associativity) : lmntal_scope.
 (* Notation "" := GZero (in custom lmntal at level 0, only parsing).
 Notation "" := RZero (in custom lmntal at level 0, only parsing). *)
@@ -69,7 +71,7 @@ Check {{ "p"("X","Y"),"q"("Y","X") :- GZero; RZero }} : RuleSet.
 Example get_functor_example: get_functor (AAtom "p" ["L";"L";"M";"M"]) = "p"/4.
 Proof. reflexivity. Qed.
 
-(* Fixpoint remove_one (x: Link) (l: list Link) : bool * list Link :=
+Fixpoint remove_one (x: Link) (l: list Link) : bool * list Link :=
   match l with
   | [] => (false, [])
   | h::t => if h =? x then (true, t)
@@ -77,19 +79,6 @@ Proof. reflexivity. Qed.
     | (b, ls) => (b, h::ls)
     end
   end.
-
-Definition toggle_add (x: Link) (l: list Link) : list Link :=
-  match (remove_one x l) with
-  | (true, ls) => ls
-  | (false, ls) => x::ls
-  end.
-
-Fixpoint freelinks (g: Graph) : list Link :=
-  match g with
-  | GZero => []
-  | GAtom (AAtom p args) => fold_right toggle_add [] args
-  | {{P,Q}} => fold_right toggle_add (freelinks P) (freelinks Q)
-  end. *)
 
 Fixpoint links (g: Graph) : list Link := 
   match g with
@@ -127,10 +116,25 @@ Compute freelinks {{ "p"("X","Y"),"q"("Y","X","F") }}.
 Compute locallinks {{ "p"("X","Y"),"q"("Y","X","F") }}.
 
 (* A graph is well-formed if each link name occurs at most twice in it *)
-Definition wellformed (g:Graph) : Prop := fold_right
+Definition wellformed_g (g:Graph) : bool := fold_right
   (fun p a => match p with
-    (x,n) => n <= 2 /\ a
-  end) True (count_map g).
+    (x,n) => if (Nat.leb n 2) then a else false
+  end) true (count_map g).
+
+Fixpoint link_list_eqb (l1 l2 : list Link) : bool :=
+  match l1,l2 with
+  | [],[] => true
+  | [],_ => false
+  | h1::t1,_ => match (remove_one h1 l2) with
+                | (true, l) => link_list_eqb t1 l
+                | (false, _) => false
+                end
+  end.
+
+Definition wellformed_r (r:Rule) : bool :=
+  match r with
+  | {{lhs :- rhs}} => link_list_eqb (freelinks lhs) (freelinks rhs)
+  end.
 
 (* P[Y/X] *)
 Fixpoint substitute (Y X:Link) (P:Graph) : Graph :=
@@ -155,19 +159,19 @@ Inductive cong : Graph -> Graph -> Prop :=
   | cong_E5 : forall P P' Q, P == P' -> {{ P,Q }} == {{ P',Q }}
   | cong_E7 : forall X, {{ X = X }} == GZero
   | cong_E8 : forall X Y, {{ X = Y }} == {{ Y = X }}
-  | cong_E9 : forall X Y (A:Atom),
-    In X (freelinks A) -> {{ X = Y, A }} == {{ A[Y/X] }}
+  | cong_E9 : forall X Y (A:Atom), In X (freelinks A) ->
+                {{ X = Y, A }} == {{ A[Y/X] }}
   | cong_refl : forall P, P == P
   | cong_trans : forall P Q R, P == Q -> Q == R -> P == R
   | cong_sym : forall P Q, P == Q -> Q == P
   where "p '==' q" := (cong p q).
 
-Definition cong_wf (p q : Graph) := wellformed p /\ wellformed q /\ cong p q.
-Notation "p '===' q" := (cong_wf p q) (at level 40).
+Definition cong_wf (p q : Graph) := wellformed_g p = true /\ wellformed_g q = true /\ cong p q.
+Notation "p '==' q" := (cong_wf p q) (at level 40).
 
-Example cong_example : {{ "p"("X","X") }} === {{ "p"("Y","Y") }}.
+Example cong_example : {{ "p"("X","X") }} == {{ "p"("Y","Y") }}.
 Proof.
-  unfold cong_wf. unfold wellformed.
+  unfold cong_wf. unfold wellformed_g.
   simpl.
   split. { auto. }
   split. { auto. }
@@ -180,4 +184,54 @@ Qed.
 
 Reserved Notation "p '-[' r ']->' q" (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
 
-Inductive rrel : Rule -> 
+Inductive rrel : Rule -> Graph -> Graph -> Prop :=
+  | rrel_R1 : forall G1 G1' G2 r,
+                G1 -[ r ]-> G1' -> {{G1,G2}} -[ r ]-> {{G1',G2}}
+  | rrel_R3 : forall G1 G1' G2 G2' r,
+                G2 == G1 -> G1 -[ r ]-> G1' -> G1' == G2' ->
+                G2 -[ r ]-> G2'
+  | rrel_R6 : forall T U, T -[ T :- U ]-> U
+  where "p '-[' r ']->' q" := (rrel r p q).
+
+Definition rrel_wf (r:Rule) (p q:Graph) : Prop :=
+  wellformed_g p = true /\ wellformed_g q = true /\ wellformed_r r = true
+    /\ rrel r p q.
+Notation "p '-[' r ']->' q" := (rrel_wf r p q).
+
+Reserved Notation "p '=[' r ']=>' q" (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
+Fixpoint rrel_ruleset (rs : RuleSet) (p q : Graph) : Prop :=
+  match rs with
+  | RZero => False
+  | RRule r => p -[ r ]-> q
+  | RMol a b => p =[ a ]=> q /\ p =[ b ]=> q
+  end
+  where "p '=[' rs ']=>' q" := (rrel_ruleset rs p q).
+
+Example rrel_example :
+  {{ "a"(), "b"("Z"), "c"("Z") }}
+  -[ "b"("X"),"c"("X") :- "d"() ]->
+  {{ "a"(), "d"() }}.
+Proof.
+  unfold rrel_wf.
+  split. { auto. }
+  split. { auto. }
+  split. { auto. }
+  apply rrel_R3 with (G1:={{"b" ("X"), "c" ("X"), "a" ()}}) (G1':={{"d" (), "a" ()}}).
+  - unfold cong_wf. simpl.
+    split. { reflexivity. }
+    split. { reflexivity. }
+    apply cong_trans with (Q:={{"a"(),("b"("Z"),"c"("Z"))}}).
+    + apply cong_sym. apply cong_E3.
+    + apply cong_trans with (Q:={{"b" ("Z"), "c" ("Z"), "a" ()}}).
+      * apply cong_E2.
+      * assert (H1: {{"b"("X"), "c"("X"), "a"()}}={{("b"("Z"), "c"("Z"),"a"())["X"/"Z"] }}).
+        { reflexivity. }
+        rewrite H1.
+        apply cong_E4.
+        simpl. left. reflexivity.
+  - apply rrel_R1. apply rrel_R6.
+  - unfold cong_wf. simpl.
+    split. { reflexivity. }
+    split. { reflexivity. }
+    apply cong_E2.
+Qed.
