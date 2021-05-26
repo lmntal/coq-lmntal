@@ -126,6 +126,12 @@ end) [] (count_map g).
 Compute freelinks {{ "p"("X","Y"),"q"("Y","X","F") }}.
 Compute locallinks {{ "p"("X","Y"),"q"("Y","X","F") }}.
 
+(* A graph is well-formed if each link name occurs at most twice in it *)
+Definition wellformed (g:Graph) : Prop := fold_right
+  (fun p a => match p with
+    (x,n) => n <= 2 /\ a
+  end) True (count_map g).
+
 (* P[Y/X] *)
 Fixpoint substitute (Y X:Link) (P:Graph) : Graph :=
   match P with
@@ -142,16 +148,35 @@ Proof. reflexivity. Qed.
 Reserved Notation "p == q" (at level 40).
 
 Inductive cong : Graph -> Graph -> Prop :=
-  | E1 : forall P, {{GZero, P}} == P
-  | E2 : forall P Q, {{P, Q}} == {{Q, P}}
-  | E3 : forall P Q R, {{P, (Q, R)}} == {{(P, Q), R}}
-  | E4 : forall P X Y, In X (locallinks P) -> ~ In Y (links P) -> P == {{ P[Y/X] }}
-  | E5 : forall P P' Q, P == P' -> {{ P,Q }} == {{ P',Q }}
-  | E7 : forall X, {{ X = X }} == GZero
-  | E8 : forall X Y, {{ X = Y }} == {{ Y = X }}
-  | E9 : forall X Y (A:Atom), In X (freelinks A) -> ~ In Y (links A) -> {{ X = Y, A }} == {{ A[Y/X] }}
+  | cong_E1 : forall P, {{GZero, P}} == P
+  | cong_E2 : forall P Q, {{P, Q}} == {{Q, P}}
+  | cong_E3 : forall P Q R, {{P, (Q, R)}} == {{(P, Q), R}}
+  | cong_E4 : forall P X Y, In X (locallinks P) -> P == {{ P[Y/X] }}
+  | cong_E5 : forall P P' Q, P == P' -> {{ P,Q }} == {{ P',Q }}
+  | cong_E7 : forall X, {{ X = X }} == GZero
+  | cong_E8 : forall X Y, {{ X = Y }} == {{ Y = X }}
+  | cong_E9 : forall X Y (A:Atom),
+    In X (freelinks A) -> {{ X = Y, A }} == {{ A[Y/X] }}
+  | cong_refl : forall P, P == P
+  | cong_trans : forall P Q R, P == Q -> Q == R -> P == R
+  | cong_sym : forall P Q, P == Q -> Q == P
   where "p '==' q" := (cong p q).
 
+Definition cong_wf (p q : Graph) := wellformed p /\ wellformed q /\ cong p q.
+Notation "p '===' q" := (cong_wf p q) (at level 40).
+
+Example cong_example : {{ "p"("X","X") }} === {{ "p"("Y","Y") }}.
+Proof.
+  unfold cong_wf. unfold wellformed.
+  simpl.
+  split. { auto. }
+  split. { auto. }
+  assert (H: ({{ "p"("Y","Y") }}:Graph) = {{ "p"("X","X")["Y"/"X"] }}).
+  { reflexivity. }
+  rewrite H.
+  apply cong_E4.
+  simpl. left. reflexivity.
+Qed.
 
 Reserved Notation "p '-[' r ']->' q" (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
 
