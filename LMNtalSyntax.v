@@ -4,6 +4,8 @@ Require Import List.
 Import ListNotations.
 Open Scope list_scope.
 
+Require Import Multiset.
+
 (* Inductive Link := 
   | LLink (name:string). *)
 Definition Link := string.
@@ -91,7 +93,7 @@ Definition Leq_dec : forall x y : Link, {x=y} + {x<>y} := string_dec.
 
 Definition unique_links (g: Graph): list Link := nodup Leq_dec (links g).
 
-Fixpoint count_map_sub (ls unique : list Link) : list (Link * nat) :=
+(* Fixpoint count_map_sub (ls unique : list Link) : list (Link * nat) :=
   match unique with
   | [] => []
   | h::t => (h, count_occ Leq_dec ls h)::(count_map_sub ls t)
@@ -100,26 +102,43 @@ Fixpoint count_map_sub (ls unique : list Link) : list (Link * nat) :=
 Definition count_map (g: Graph) : list (Link * nat) :=
   count_map_sub (links g) (unique_links g).
 
-Compute count_map_sub ["X";"Y";"X";"Y";"F"] ["X";"Y";"F"].
+Compute count_map_sub ["X";"Y";"X";"Y";"F"] ["X";"Y";"F"]. *)
+
+Definition list_to_multiset (l:list Link) : multiset Link :=
+  fold_right (fun x a => munion (SingletonBag eq Leq_dec x) a) (EmptyBag Link) l.
+
+Definition link_multiset (g: Graph) : multiset Link :=
+  list_to_multiset (links g).
 
 Definition freelinks (g: Graph) : list Link := fold_right 
-  (fun p a => match p with
-    (x,n) => if (Nat.eqb n 1) then x::a else a
-  end) [] (count_map g).
+  (fun x a => if (Nat.eqb (multiplicity (link_multiset g) x) 1) then x::a else a) [] (unique_links g).
 
-Definition locallinks (g: Graph) : list Link := fold_right 
-(fun p a => match p with
-  (x,n) => if (Nat.eqb n 2) then x::a else a
-end) [] (count_map g).
+Definition locallinks (g: Graph) : list Link := fold_right
+  (fun x a => if (Nat.eqb (multiplicity (link_multiset g) x) 2) then x::a else a) [] (unique_links g).
 
 Compute freelinks {{ "p"("X","Y"),"q"("Y","X","F") }}.
 Compute locallinks {{ "p"("X","Y"),"q"("Y","X","F") }}.
 
+Check forallb.
+
 (* A graph is well-formed if each link name occurs at most twice in it *)
-Definition wellformed_g (g:Graph) : bool := fold_right
-  (fun p a => match p with
-    (x,n) => if (Nat.leb n 2) then a else false
-  end) true (count_map g).
+Definition wellformed_g (g:Graph) : Prop :=
+  forallb (fun x => Nat.leb (multiplicity (link_multiset g) x) 2) (unique_links g) = true.
+  (* fold_right (fun x a => (multiplicity (link_multiset g) x) <= 2 /\ a) True (unique_links g). *)
+
+Lemma wellformed_g_forall: forall g, wellformed_g g <->
+  forall x, In x (unique_links g) -> (multiplicity (link_multiset g) x) <= 2.
+Proof.
+  intros g.
+  split.
+  - intros H1 x H2.
+    unfold wellformed_g in H1. rewrite forallb_forall in H1.
+    apply H1 in H2. rewrite PeanoNat.Nat.leb_le in H2.
+    apply H2.
+  - intros H1. unfold wellformed_g. rewrite forallb_forall.
+    intros x H2. rewrite PeanoNat.Nat.leb_le.
+    apply H1. apply H2.
+Qed.
 
 Fixpoint link_list_eqb (l1 l2 : list Link) : bool :=
   match l1,l2 with
@@ -131,9 +150,12 @@ Fixpoint link_list_eqb (l1 l2 : list Link) : bool :=
                 end
   end.
 
-Definition wellformed_r (r:Rule) : bool :=
+Definition link_list_eq (l1 l2 : list Link) : Prop :=
+  meq (list_to_multiset l1) (list_to_multiset l2).
+
+Definition wellformed_r (r:Rule) : Prop :=
   match r with
-  | {{lhs :- rhs}} => link_list_eqb (freelinks lhs) (freelinks rhs)
+  | {{lhs :- rhs}} => link_list_eq (freelinks lhs) (freelinks rhs)
   end.
 
 (* P[Y/X] *)
@@ -166,8 +188,36 @@ Inductive cong : Graph -> Graph -> Prop :=
   | cong_sym : forall P Q, P == Q -> Q == P
   where "p '==' q" := (cong p q).
 
-Definition cong_wf (p q : Graph) := wellformed_g p = true /\ wellformed_g q = true /\ cong p q.
+Definition cong_wf (p q : Graph) := wellformed_g p /\ wellformed_g q /\ cong p q.
 Notation "p '==' q" := (cong_wf p q) (at level 40).
+
+Lemma cong_wf_refl : forall P, wellformed_g P -> P == P.
+Proof.
+  intros P. unfold cong_wf.
+  split. { auto. }
+  split. { auto. }
+  apply cong_refl.
+Qed.
+
+Lemma cong_wf_trans: forall P Q R, P == Q -> Q == R -> P == R.
+Proof.
+  intros P Q R [HPQP [HPQQ HPQ]] [HQRQ [HQRR HQR]].
+  unfold cong_wf.
+  split. { apply HPQP. }
+  split. { apply HQRR. }
+  apply (cong_trans _ Q _).
+  - apply HPQ.
+  - apply HQR.
+Qed.
+
+Lemma cong_wf_sym: forall P Q, P == Q -> Q == P.
+Proof.
+  intros P Q [HP [HQ H]].
+  split. { apply HQ. }
+  split. { apply HP. }
+  apply cong_sym.
+  apply H.
+Qed.
 
 Example cong_example : {{ "p"("X","X") }} == {{ "p"("Y","Y") }}.
 Proof.
@@ -194,7 +244,7 @@ Inductive rrel : Rule -> Graph -> Graph -> Prop :=
   where "p '-[' r ']->' q" := (rrel r p q).
 
 Definition rrel_wf (r:Rule) (p q:Graph) : Prop :=
-  wellformed_g p = true /\ wellformed_g q = true /\ wellformed_r r = true
+  wellformed_g p /\ wellformed_g q /\ wellformed_r r
     /\ rrel r p q.
 Notation "p '-[' r ']->' q" := (rrel_wf r p q).
 
@@ -213,13 +263,13 @@ Example rrel_example :
   {{ "a"(), "d"() }}.
 Proof.
   unfold rrel_wf.
-  split. { auto. }
-  split. { auto. }
-  split. { auto. }
+  split. { unfold wellformed_g. simpl. auto. }
+  split. { unfold wellformed_g. simpl. auto. }
+  split. { unfold wellformed_r. unfold link_list_eq. simpl. apply meq_refl. }
   apply rrel_R3 with (G1:={{"b" ("X"), "c" ("X"), "a" ()}}) (G1':={{"d" (), "a" ()}}).
   - unfold cong_wf. simpl.
-    split. { reflexivity. }
-    split. { reflexivity. }
+    split. { unfold wellformed_g. simpl. auto. }
+    split. { unfold wellformed_g. simpl. auto. }
     apply cong_trans with (Q:={{"a"(),("b"("Z"),"c"("Z"))}}).
     + apply cong_sym. apply cong_E3.
     + apply cong_trans with (Q:={{"b" ("Z"), "c" ("Z"), "a" ()}}).
@@ -234,4 +284,161 @@ Proof.
     split. { reflexivity. }
     split. { reflexivity. }
     apply cong_E2.
+Qed.
+
+Definition inv (r:Rule) : Rule :=
+  match r with
+  | {{ lhs:-rhs }} => {{ rhs :- lhs }}
+  end.
+
+Lemma link_list_eq_commut : forall l1 l2,
+  link_list_eq l1 l2 <-> link_list_eq l2 l1.
+Proof.
+  intros l1 l2.
+  unfold link_list_eq.
+  split.
+  - apply meq_sym.
+  - apply meq_sym.
+Qed.
+  (* intros l1.
+  induction l1 as [|h1 t1 IH].
+  - intros l2. destruct l2 as [|h2 t2].
+    + reflexivity.
+    + reflexivity.
+  - intros l2. simpl. destruct l2 as [|h2 t2].
+    + reflexivity.
+    + simpl. destruct (h1 =? h2) eqn:E.
+      * rewrite eqb_sym in E.
+        rewrite E. apply IH.
+      * rewrite eqb_sym in E.
+        rewrite E. *)
+
+Lemma list_to_multiset_app:
+  forall l1 l2, meq (list_to_multiset (l1 ++ l2)) (munion (list_to_multiset l1) (list_to_multiset l2)).
+Proof.
+  intros l1 l2.
+  induction l1.
+  - simpl. apply munion_empty_left.
+  - simpl. apply meq_trans
+      with (munion (SingletonBag eq Leq_dec a) (munion (list_to_multiset l1) (list_to_multiset l2))).
+    + apply meq_right. apply IHl1.
+    + apply meq_sym. apply munion_ass.
+Qed.
+
+Lemma link_multiset_mol:
+  forall G1 G2, meq (link_multiset {{G1,G2}}) (munion (link_multiset G1) (link_multiset G2)).
+Proof.
+  intros G1. destruct G1.
+  - intros G2. unfold link_multiset.
+    replace (links GZero) with ([]:list Link).
+    + simpl. apply munion_empty_left.
+    + reflexivity.
+  - intros G2. unfold link_multiset. destruct atom. simpl.
+    apply list_to_multiset_app.
+  - intros G2. unfold link_multiset.
+    replace (links {{G1_1, G1_2}}) with (links {{G1_1}} ++ links {{G1_2}}).
+    + apply list_to_multiset_app.
+    + reflexivity.
+Qed.
+
+Lemma multiplicity_munionL: forall {X:Type} (m m1 m2:multiset X) (x:X),
+  meq m (munion m1 m2) -> multiplicity m1 x <= multiplicity m x.
+Proof.
+  intros X m m1 m2 x H.
+  unfold meq in H.
+  rewrite H.
+  unfold munion. simpl.
+  apply PeanoNat.Nat.le_add_r.
+Qed.
+
+Lemma multiplicity_munionR: forall {X:Type} (m m1 m2:multiset X) (x:X),
+  meq m (munion m1 m2) -> multiplicity m2 x <= multiplicity m x.
+Proof.
+  intros X m m1 m2 x H.
+  unfold meq in H.
+  rewrite H.
+  unfold munion. simpl. rewrite PeanoNat.Nat.add_comm.
+  apply PeanoNat.Nat.le_add_r.
+Qed.
+
+Lemma in_unique_links:
+  forall g x, In x (unique_links g) <-> In x (links g).
+Proof.
+  intros g x.
+  unfold unique_links.
+  apply nodup_In.
+Qed.
+
+Lemma links_mol:
+  forall G1 G2 x, In x (links {{G1,G2}}) <-> In x (links G1) \/ In x (links G2).
+Proof.
+  intros G1 G2 x.
+  replace (links {{G1,G2}}) with (links G1 ++ links G2).
+  - apply in_app_iff.
+  - reflexivity.
+Qed.
+
+Lemma wellformed_g_inj:
+  forall G1 G2, wellformed_g {{G1,G2}} -> wellformed_g G1 /\ wellformed_g G2.
+Proof.
+  intros G1 G2 H.
+  rewrite wellformed_g_forall in H.
+  split.
+  - rewrite wellformed_g_forall. intros x H1.
+    apply PeanoNat.Nat.le_trans with (multiplicity (link_multiset {{G1, G2}}) x).
+    + apply multiplicity_munionL with (link_multiset G2).
+      apply link_multiset_mol.
+    + apply H. rewrite in_unique_links. rewrite links_mol.
+      rewrite in_unique_links in H1. left. apply H1.
+  - rewrite wellformed_g_forall. intros x H1.
+    apply PeanoNat.Nat.le_trans with (multiplicity (link_multiset {{G1, G2}}) x).
+    + apply multiplicity_munionR with (link_multiset G1).
+      apply link_multiset_mol.
+    + apply H. rewrite in_unique_links. rewrite links_mol.
+      rewrite in_unique_links in H1. right. apply H1.
+Qed.
+
+Theorem inv_rrel: forall r G G', G' -[r]-> G
+  -> let inv_r := inv r in G -[ inv_r ]-> G'.
+Proof.
+  intros r G G' H. simpl.
+  unfold rrel_wf. unfold rrel_wf in H.
+  destruct H as [H1 [H2 [H3 H4]]].
+  split. { apply H2. }
+  split. { apply H1. }
+  split. { simpl. destruct r. apply link_list_eq_commut.
+           simpl in H3. apply H3. }
+  simpl.
+  induction H4 as [G1 G1' G2 r' IH1 IH2 | G1 G1' G2 G2' r' IH1 IH2 IH3 IH4 | T U].
+  - (* Case (R1) *)
+    apply rrel_R1. apply IH2.
+    + apply wellformed_g_inj with (G2:=G2). apply H1.
+    + apply wellformed_g_inj with (G2:=G2). apply H2.
+    + apply H3.
+  - (* Case (R3) *)
+    apply rrel_R3 with (G1') (G1).
+    + apply cong_wf_sym. apply IH4.
+    + apply IH3.
+      * destruct IH1 as [_ [H _]]. apply H.
+      * destruct IH4 as [H [_ _]]. apply H.
+      * apply H3.
+    + apply cong_wf_sym. apply IH1.
+  - (* Case (R6) *)
+    apply rrel_R6.
+Qed.
+
+Lemma inv_inv : forall r, inv (inv r) = r.
+Proof.
+  intros [lhs rhs]. reflexivity.
+Qed.
+
+Theorem inv_rrel_iff: forall r G G', G' -[r]-> G
+  <-> let inv_r := inv r in G -[ inv_r ]-> G'.
+Proof.
+  intros r G G'.
+  split.
+  - apply inv_rrel.
+  - simpl. intros H. apply inv_rrel in H.
+    rewrite inv_inv in H.
+    apply H.
 Qed.
