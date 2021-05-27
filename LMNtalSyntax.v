@@ -6,6 +6,7 @@ Open Scope list_scope.
 
 Require Import Multiset.
 
+(* Module LMNtalSyntax. *)
 (* Inductive Link := 
   | LLink (name:string). *)
 Definition Link := string.
@@ -171,24 +172,24 @@ Example substitute_example :
   {{ ( "p"("X", "Y"), "q"("Y", "X") ) [ "L" / "X" ] }} = {{ "p"("L", "Y"), "q"("Y", "L") }}.
 Proof. reflexivity. Qed.
 
-Reserved Notation "p == q" (at level 40).
+Reserved Notation "p ~= q" (at level 40).
 
 Inductive cong : Graph -> Graph -> Prop :=
-  | cong_E1 : forall P, {{GZero, P}} == P
-  | cong_E2 : forall P Q, {{P, Q}} == {{Q, P}}
-  | cong_E3 : forall P Q R, {{P, (Q, R)}} == {{(P, Q), R}}
-  | cong_E4 : forall P X Y, In X (locallinks P) -> P == {{ P[Y/X] }}
-  | cong_E5 : forall P P' Q, P == P' -> {{ P,Q }} == {{ P',Q }}
-  | cong_E7 : forall X, {{ X = X }} == GZero
-  | cong_E8 : forall X Y, {{ X = Y }} == {{ Y = X }}
+  | cong_E1 : forall P, {{GZero, P}} ~= P
+  | cong_E2 : forall P Q, {{P, Q}} ~= {{Q, P}}
+  | cong_E3 : forall P Q R, {{P, (Q, R)}} ~= {{(P, Q), R}}
+  | cong_E4 : forall P X Y, In X (locallinks P) -> P ~= {{ P[Y/X] }}
+  | cong_E5 : forall P P' Q, P ~= P' -> {{ P,Q }} ~= {{ P',Q }}
+  | cong_E7 : forall X, {{ X = X }} ~= GZero
+  | cong_E8 : forall X Y, {{ X = Y }} ~= {{ Y = X }}
   | cong_E9 : forall X Y (A:Atom), In X (freelinks A) ->
-                {{ X = Y, A }} == {{ A[Y/X] }}
-  | cong_refl : forall P, P == P
-  | cong_trans : forall P Q R, P == Q -> Q == R -> P == R
-  | cong_sym : forall P Q, P == Q -> Q == P
-  where "p '==' q" := (cong p q).
+                {{ X = Y, A }} ~= {{ A[Y/X] }}
+  | cong_refl : forall P, P ~= P
+  | cong_trans : forall P Q R, P ~= Q -> Q ~= R -> P ~= R
+  | cong_sym : forall P Q, P ~= Q -> Q ~= P
+  where "p '~=' q" := (cong p q).
 
-Definition cong_wf (p q : Graph) := wellformed_g p /\ wellformed_g q /\ cong p q.
+Definition cong_wf (p q : Graph) := wellformed_g p /\ wellformed_g q /\ p ~= q.
 Notation "p '==' q" := (cong_wf p q) (at level 40).
 
 Lemma cong_wf_refl : forall P, wellformed_g P -> P == P.
@@ -232,30 +233,42 @@ Proof.
   simpl. left. reflexivity.
 Qed.
 
-Reserved Notation "p '-[' r ']->' q" (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
+Reserved Notation "p '~[' r ']->' q" (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
 
 Inductive rrel : Rule -> Graph -> Graph -> Prop :=
   | rrel_R1 : forall G1 G1' G2 r,
-                G1 -[ r ]-> G1' -> {{G1,G2}} -[ r ]-> {{G1',G2}}
+                G1 ~[ r ]-> G1' -> {{G1,G2}} ~[ r ]-> {{G1',G2}}
   | rrel_R3 : forall G1 G1' G2 G2' r,
-                G2 == G1 -> G1 -[ r ]-> G1' -> G1' == G2' ->
-                G2 -[ r ]-> G2'
-  | rrel_R6 : forall T U, T -[ T :- U ]-> U
-  where "p '-[' r ']->' q" := (rrel r p q).
+                G2 == G1 -> G1 ~[ r ]-> G1' -> G1' == G2' ->
+                G2 ~[ r ]-> G2'
+  | rrel_R6 : forall T U, T ~[ T :- U ]-> U
+  where "p '~[' r ']->' q" := (rrel r p q).
 
 Definition rrel_wf (r:Rule) (p q:Graph) : Prop :=
   wellformed_g p /\ wellformed_g q /\ wellformed_r r
-    /\ rrel r p q.
-Notation "p '-[' r ']->' q" := (rrel_wf r p q).
+    /\ p ~[ r ]-> q.
+Notation "p '-[' r ']->' q" := (rrel_wf r p q) (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
+
+Reserved Notation "p '-[' r ']->*' q" (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
+Inductive rrel_wf_rep : Rule -> Graph -> Graph -> Prop :=
+  | rrel_wf_rep_refl : forall r a b, a == b -> a -[ r ]->* b
+  | rrel_wf_rep_step : forall r a b c, a -[ r ]->* b -> b -[ r ]-> c -> a -[ r ]->* c
+  where "p '-[' r ']->*' q" := (rrel_wf_rep r p q).
 
 Reserved Notation "p '=[' r ']=>' q" (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
 Fixpoint rrel_ruleset (rs : RuleSet) (p q : Graph) : Prop :=
   match rs with
   | RZero => False
   | RRule r => p -[ r ]-> q
-  | RMol a b => p =[ a ]=> q /\ p =[ b ]=> q
+  | RMol a b => p =[ a ]=> q \/ p =[ b ]=> q
   end
   where "p '=[' rs ']=>' q" := (rrel_ruleset rs p q).
+
+Reserved Notation "p '=[' r ']=>*' q" (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
+Inductive rrel_ruleset_rep : RuleSet -> Graph -> Graph -> Prop :=
+  | rrel_ruleset_rep_refl : forall rs a b, a == b -> a =[ rs ]=>* b
+  | rrel_ruleset_rep_step : forall rs a b c, a =[ rs ]=>* b -> b =[ rs ]=> c -> a =[ rs ]=>* c
+  where "p '=[' r ']=>*' q" := (rrel_ruleset_rep r p q).
 
 Example rrel_example :
   {{ "a"(), "b"("Z"), "c"("Z") }}
@@ -442,3 +455,5 @@ Proof.
     rewrite inv_inv in H.
     apply H.
 Qed.
+
+(* End LMNtalSyntax. *)

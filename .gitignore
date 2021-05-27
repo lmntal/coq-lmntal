@@ -1,0 +1,6 @@
+*
+
+!.gitignore
+!*.v
+!Makefile
+!README.md
