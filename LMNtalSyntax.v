@@ -189,6 +189,18 @@ Inductive cong : Graph -> Graph -> Prop :=
   | cong_sym : forall P Q, P ~= Q -> Q ~= P
   where "p '~=' q" := (cong p q).
 
+(* Reserved Notation "p '==' q" (at level 40).
+Inductive cong_wf : Graph -> Graph -> Prop :=
+  | cong_wf_step : forall P Q,  wellformed_g P -> wellformed_g Q ->
+                                  P ~= Q -> P == Q
+  | cong_wf_trans : forall P Q R, P == Q -> Q == R -> P == R
+  where "p '==' q" := (cong_wf p q). *)
+
+(* Lemma cong_wf_sym : forall P Q, P == Q -> Q == P.
+Proof.
+  intros P Q H. *)
+  
+
 Definition cong_wf (p q : Graph) := wellformed_g p /\ wellformed_g q /\ p ~= q.
 Notation "p '==' q" := (cong_wf p q) (at level 40).
 
@@ -411,6 +423,51 @@ Proof.
       rewrite in_unique_links in H1. right. apply H1.
 Qed.
 
+(* 
+Lemma wellformed_g_cong :
+  forall P Q, wellformed_g P -> cong P Q -> wellformed_g Q.
+Proof.
+  intros P Q HwfP Hcong.
+  rewrite wellformed_g_forall.
+  rewrite wellformed_g_forall in HwfP.
+  induction Hcong; auto.
+  - intros x H.
+    assert (A: meq (link_multiset {{P,Q}}) (link_multiset {{Q,P}})).
+    { apply meq_trans with (munion (link_multiset {{P}}) (link_multiset {{Q}})).
+      { apply link_multiset_mol. }
+      apply meq_trans with (munion (link_multiset {{Q}}) (link_multiset {{P}})).
+      { apply munion_comm. }
+      apply meq_sym.
+      apply link_multiset_mol. }
+    unfold meq in A. rewrite <- A.
+    apply HwfP.
+    apply in_unique_links. apply links_mol.
+    apply in_unique_links in H. apply links_mol in H.
+    destruct H; auto.
+  - intros x H.
+    assert (A: meq (link_multiset {{P,Q,R}}) (link_multiset {{P,(Q,R)}})).
+    { apply meq_trans with (munion (link_multiset {{P,Q}}) (link_multiset {{R}})).
+      { apply link_multiset_mol. }
+      apply meq_trans with (munion (munion (link_multiset P) (link_multiset Q)) (link_multiset R)).
+      { apply meq_left. apply link_multiset_mol. }
+      apply meq_trans with (munion (link_multiset P) (munion (link_multiset Q) (link_multiset R))).
+      { apply munion_ass. }
+      apply meq_trans with (munion (link_multiset P) (link_multiset {{Q,R}})).
+      { apply meq_right. apply meq_sym. apply link_multiset_mol. }
+      apply meq_sym. apply link_multiset_mol.
+    }
+    rewrite A. apply HwfP.
+    apply in_unique_links. repeat rewrite links_mol.
+    apply in_unique_links in H. repeat rewrite links_mol in H.
+    destruct H as [[|]|]; auto.
+  - intros x H1. admit.
+  - admit.
+  - admit.
+  - admit.
+  - admit.
+Abort. *)
+    
+
 Theorem inv_rrel: forall r G G', G' -[r]-> G
   -> let inv_r := inv r in G -[ inv_r ]-> G'.
 Proof.
@@ -455,5 +512,41 @@ Proof.
     rewrite inv_inv in H.
     apply H.
 Qed.
+
+Fixpoint term_to_atom_list (t: Graph) : list Atom :=
+  match t with
+  | GZero => []
+  | GAtom atom => [atom]
+  | GMol g1 g2 => (term_to_atom_list g1)++(term_to_atom_list g2)
+  end.
+
+Fixpoint add_indices {X} (n : nat) (l : list X) : list (nat * X) := 
+  match l with
+  | h :: t => (n,h) :: add_indices (S n) t
+  | [] => []
+  end.
+
+Fixpoint add_to_port_list (name : string) (atomid argpos : nat) (l : list (string * list (nat * nat))) :=
+  match l with
+  | (name', list) :: t => if string_dec name name'
+                          then (name, (atomid, argpos) :: list) :: t
+                          else (name, list) :: 
+                               (add_to_port_list name atomid argpos t)
+  | [] => [(name, [(atomid, argpos)])]
+  end.
+
+Definition add_atom_to_port_list (atomid : nat) (links : list Link) (pl : list (string * list (nat * nat))) :=
+  fold_right (fun x a => match x with
+              | (argpos,link) => add_to_port_list link atomid argpos a
+              end) pl (add_indices O links).
+
+Definition atom_list_to_port_list (atoms: list Atom) :=
+  fold_right (fun x a => match x with
+              | (atomid, AAtom _ links) => add_atom_to_port_list atomid links a
+              end) [] (add_indices O atoms).
+
+(* Definition term_to_port_list (t: Graph) := atom_list_to_port_list (term_to_atom_list t). *)
+
+Definition count_atoms (t: Graph) := length (term_to_atom_list t).
 
 (* End LMNtalSyntax. *)

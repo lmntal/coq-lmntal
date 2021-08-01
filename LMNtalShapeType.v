@@ -10,7 +10,7 @@ From LMNTAL Require Export LMNtalSyntax.
 Open Scope lmntal_scope.
 
 Inductive ShapeType : Type :=
-  | defshape (S: Functor) (P: RuleSet) (N: list Functor).
+  | defshape (S: LMNtalSyntax.Functor) (P: LMNtalSyntax.RuleSet) (N: list LMNtalSyntax.Functor).
 
 (* Notation "'defshape' S '{' P '} 'nonterminal' {' N }" := (ty S P N)
   (at level 40, P custom lmntal at level 99, N custom lmntal at level 99) : lmntal_scope. *)
