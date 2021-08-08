@@ -170,7 +170,7 @@ Proof.
   unfold empty. unfold swap_atomid.
   destruct (nat_dec n i1); auto.
   destruct (nat_dec n i2); auto.
-Qed.
+Admitted.
 
 Lemma nth_error_cons_S :
   forall A h t n, @nth_error A (h::t) (S n) = @nth_error A t n.
