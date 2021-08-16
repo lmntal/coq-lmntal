@@ -4,3 +4,8 @@
 !*.v
 !Makefile
 !README.md
+!_CoqProject
+!*.pdf
+!*.png
+!*.svg
+!*.sh

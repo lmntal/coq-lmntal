@@ -59,12 +59,41 @@ Proof.
   split. { reflexivity. }
   apply rrel_ruleset_rep_step with {{"t"("X","Y")}}.
   - apply rrel_ruleset_rep_refl.
-    apply cong_wf_refl. unfold wellformed_g. reflexivity.
+    apply cong_refl. unfold wellformed_g. reflexivity.
   - unfold rrel_ruleset.
-    unfold rrel_wf.
-    split. { unfold wellformed_g. auto. }
-    split. { unfold wellformed_g. auto. }
-    split. { unfold wellformed_r. unfold freelinks. simpl.
-             unfold link_list_eq. apply Multiset.meq_refl. }
     apply rrel_R6.
+    + unfold wellformed_g. auto.
+    + unfold wellformed_g. auto.
+    + unfold wellformed_r. unfold freelinks. simpl.
+      unfold link_list_eq. apply Multiset.meq_refl.
 Qed.
+
+Definition is_connector (a:Atom) : Prop :=
+  get_functor a = "="/2.
+
+Definition CFp (p:Rule) : Prop :=
+  match p with
+  | {{ lhs :- rhs }} =>
+    match lhs with
+    | GAtom a => ~ (is_connector a) /\
+        exists b,
+          In b (term_to_atom_list rhs)
+          /\ ~ (is_connector b)
+    | _ => False
+    end
+  end.
+
+Definition CF (t:ShapeType) : Prop :=
+  match t with
+  | defshape s P N =>
+    forall p, In p (ruleset_to_list P) -> CFp p
+  end.
+
+Definition is_weighting g w :=
+  forall f,
+    In f (funct g) ->
+    f = "="/2 /\ w f = 0 \/
+    f <> "="/2 /\ 1 <= w f.
+
+(* Definition weight w g := Admitted. *)
+  

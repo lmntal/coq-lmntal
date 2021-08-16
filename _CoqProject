@@ -1,0 +1,6 @@
+-Q . LMNTAL
+LMNtalSyntax.v
+LMNtalShapeType.v
+LMNtalGraph.v
+Properties.v
+Util.v

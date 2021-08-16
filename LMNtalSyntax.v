@@ -39,7 +39,7 @@ Coercion GAtom : Atom >-> Graph.
 Declare Custom Entry lmntal.
 Declare Scope lmntal_scope.
 Notation "{{ e }}" := e (at level 0, e custom lmntal at level 99) : lmntal_scope.
-Notation "( x )" := x (in custom lmntal, x at level 99) : lmntal_scope.
+Notation "( x )" := x (in custom lmntal, x at level 2) : lmntal_scope.
 Notation "x" := x (in custom lmntal at level 0, x constr at level 0) : lmntal_scope.
 Notation "p ( x , .. , y )" := (AAtom p (cons x .. (cons y nil) .. ))
                   (in custom lmntal at level 0,
@@ -200,13 +200,13 @@ Proof.
 Qed.
 
 Ltac solve_refl :=
-      repeat (
-        unfold wellformed_g, wellformed_r,
-                freelinks, locallinks,
-                unique_links, substitute_link
-      || rewrite Leq_dec_refl 
-      || rewrite eqb_refl
-      || simpl); auto.
+  repeat (
+    unfold wellformed_g, wellformed_r,
+            freelinks, locallinks,
+            unique_links, substitute_link
+  || rewrite Leq_dec_refl 
+  || rewrite eqb_refl
+  || simpl); auto.
 
 Example cong_example_var : forall p X Y, {{ p(X,X) }} == {{ p(Y,Y) }}.
 Proof.
@@ -299,6 +299,43 @@ Proof.
   - apply rrel_R1; solve_refl.
     + unfold link_list_eq. simpl. apply meq_refl.
     + apply rrel_R6; solve_refl. unfold link_list_eq. simpl. apply meq_refl.
+Qed.
+
+Fixpoint ruleset_to_list rs :=
+  match rs with
+  | RZero => []
+  | RRule r => [r]
+  | RMol a b => (ruleset_to_list a) ++ (ruleset_to_list b)
+  end.
+
+Lemma rrel_ruleset_In :
+  forall p q rs, p =[ rs ]=> q <->
+    (exists r, In r (ruleset_to_list rs)
+      /\ p -[ r ]-> q).
+Proof.
+  intros p q rs.
+  generalize dependent q.
+  generalize dependent p.
+  induction rs; split; intros H.
+  - simpl in H. destruct H.
+  - simpl in H. destruct H.
+    destruct H as [[] _].
+  - simpl in H. exists rule.
+    simpl. auto.
+  - simpl in H. destruct H.
+    destruct H as [[H1|[]] H2].
+    simpl. rewrite H1. auto.
+  - destruct H;
+    [ rewrite IHrs1 in H | rewrite IHrs2 in H ];
+    destruct H; destruct H as [H1 H2];
+    exists x; simpl;
+    rewrite in_app_iff; auto.
+  - destruct H. simpl.
+    simpl in H. rewrite in_app_iff in H.
+    destruct H as [[H1|H1] H2];
+    [ left | right ];
+    [ rewrite IHrs1 | rewrite IHrs2 ];
+    exists x; auto.
 Qed.
 
 Definition inv (r:Rule) : Rule :=
