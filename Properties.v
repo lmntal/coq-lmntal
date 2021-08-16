@@ -472,7 +472,10 @@ Proof.
               simpl. destruct (add_indices 1 (subst_nth i2 a l)); simpl.
               * unfold newatom. unfold upd_graph.
                 simpl. f_equal. unfold make_atom.
-                f_equal.  }
+                f_equal. admit.
+              * admit.
+            + admit.
+          - admit. }
       apply nth_error_Some in H2.
   
   (* destruct (nat_dec n i1);
@@ -626,14 +629,12 @@ Theorem cong_to_iso :
   forall t1 t2 g1 g2,
     g1 = term_to_graph t1 ->
     g2 = term_to_graph t2 ->
-    cong_wf t1 t2 -> isomorphic g1 g2.
+    cong t1 t2 -> isomorphic g1 g2.
 Proof.
   intros t1 t2 g1 g2 Hg1 Hg2 H.
   generalize dependent g2.
   generalize dependent g1.
-  destruct H.
-  destruct H0.
-  induction H1; intros g1 Hg1 g2 Hg2;
+  induction H; intros g1 Hg1 g2 Hg2;
   unfold isomorphic; rewrite Hg1; rewrite Hg2.
   - exists []. rewrite term_to_graph_gzero_p.
     simpl. unfold equiv. reflexivity.
@@ -645,8 +646,6 @@ Proof.
   - exists []. simpl.
     apply term_to_graph_link_subst; auto.
   - apply cong_to_iso_E5. apply IHcong; auto.
-    + apply wellformed_g_inj in H. destruct H. apply H.
-    + apply wellformed_g_inj in H0. destruct H0. apply H0.
   - exists []. simpl.
     unfold equiv. intros n.
     unfold term_to_graph. simpl.
@@ -673,8 +672,8 @@ Proof.
   - admit.
   - apply isomorphic_refl.
   - apply isomorphic_trans with (G2:=(term_to_graph Q)).
-    + apply IHcong1; auto. admit.
-    + apply IHcong2; auto. admit.
+    + apply IHcong1; auto.
+    + apply IHcong2; auto.
   - apply isomorphic_sym.
     + apply IHcong; auto.
 Admitted.
@@ -683,6 +682,6 @@ Theorem iso_to_cong :
   forall t1 t2 g1 g2,
     g1 = term_to_graph t1 ->
     g2 = term_to_graph t2 ->
-    isomorphic g1 g2 -> cong_wf t1 t2.
+    isomorphic g1 g2 -> cong t1 t2.
 Admitted.
 
