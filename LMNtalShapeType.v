@@ -39,12 +39,15 @@ Proof.
   - apply string_dec.
 Qed.
 
-Fixpoint funct (g:Graph) : set Functor :=
-  match g with
-  | GZero => []
-  | GAtom a => [get_functor a]
-  | {{ P,Q }} => set_union Feq_dec (funct P) (funct Q)
+Fixpoint fold_graph {T} f g u G : T :=
+  match G with
+  | GZero => u
+  | GAtom a => f a
+  | {{ G1, G2 }} => g (fold_graph f g u G1) (fold_graph f g u G2)
   end.
+
+Definition funct (g:Graph) : set Functor :=
+  fold_graph (fun a => [get_functor a]) (set_union Feq_dec) [] g.
 
 Definition trel (t:ShapeType) (g:Graph) : Prop :=
   match t with
@@ -94,6 +97,51 @@ Definition is_weighting g w :=
     In f (funct g) ->
     f = "="/2 /\ w f = 0 \/
     f <> "="/2 /\ 1 <= w f.
-
-(* Definition weight w g := Admitted. *)
   
+Definition weight w g :=
+  fold_right (fun a s => w (get_functor a) + s) 0 (term_to_atom_list g).
+
+Lemma assoc_fold_right:
+  forall A B f g u (la:list A) (b:B), 
+    (forall a, g a u = a) ->
+    (forall a, g u a = a) ->
+    (forall a b c, g (g a b) c = g a (g b c)) ->
+    g (fold_right (fun a s => g (f a) s) u la) b
+    = fold_right (fun a s => g (f a) s) b la.
+Proof.
+  intros A B f g u la b H1 H2 H3.
+  generalize dependent b.
+  induction la; simpl; auto.
+  intros b.
+  rewrite <- IHla.
+  rewrite H1, H3.
+  f_equal. apply IHla.
+Qed.
+
+Lemma assoc_fold_graph:
+  forall A f g u P,
+    (forall a, g a u = a) ->
+    (forall a, g u a = a) ->
+    (forall a b c, g (g a b) c = g a (g b c)) ->
+    @fold_graph A f g u P =
+    @fold_right A _ (fun a s => g (f a) s) u (term_to_atom_list P).
+Proof.
+  intros A f g u P H1 H2 H3.
+  induction P; simpl; auto.
+  rewrite fold_right_app. rewrite IHP1, IHP2. simpl.
+  remember (fold_right (fun a s => g (f a) s) u (term_to_atom_list P2)) as a2.
+  apply assoc_fold_right; auto.
+Qed.
+
+Lemma weight_fold:
+  forall w g, weight w g =
+    fold_graph (fun a => w (get_functor a)) plus 0 g.
+Proof.
+  intros w g. unfold weight.
+  symmetry.
+  assert (A:= PeanoNat.Nat.add_assoc).
+  apply assoc_fold_graph; auto.
+Qed.
+
+
+
