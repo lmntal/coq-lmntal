@@ -3,4 +3,6 @@ LMNtalSyntax.v
 LMNtalShapeType.v
 LMNtalGraph.v
 Properties.v
+LMNtalGraph2.v
+Properties2.v
 Util.v

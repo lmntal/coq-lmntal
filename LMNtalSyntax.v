@@ -15,6 +15,9 @@ Inductive Functor : Type :=
   | FFunctor (name:string) (arity:nat).
 Notation "p / n" := (FFunctor p n).
 
+Definition Feq_dec: forall x y : Functor, {x=y} +{x<>y}.
+Proof. repeat decide equality. Defined.
+
 Definition get_functor (a:Atom) : Functor :=
   match a with
   | AAtom p ls => p / length ls
@@ -1782,6 +1785,23 @@ Fixpoint term_to_atom_list (t: Graph) : list Atom :=
   | GMol g1 g2 => (term_to_atom_list g1)++(term_to_atom_list g2)
   end.
 
+Definition is_connector (a:Atom) :=
+  Feq_dec (get_functor a) ("="/2).
+
+Fixpoint get_connectors (l: list Atom): list Atom * list Atom :=
+  match l with
+  | [] => ([],[])
+  | h::t =>
+    match h, (get_connectors t) with
+      (AAtom name links), (conns, atoms) =>
+        if is_connector h
+        then (conns, h::atoms)
+        else (h::conns, atoms)
+    end
+  end.
+
+(* TODO: fuse_connectors *)
+
 Fixpoint add_indices {X} (n : nat) (l : list X) : list (nat * X) := 
   match l with
   | h :: t => (n,h) :: add_indices (S n) t
@@ -1791,8 +1811,8 @@ Fixpoint add_indices {X} (n : nat) (l : list X) : list (nat * X) :=
 Fixpoint add_to_port_list (name : string) (atomid argpos : nat) (l : list (string * list (nat * nat))) :=
   match l with
   | (name', list) :: t => if string_dec name name'
-                          then (name, (atomid, argpos) :: list) :: t
-                          else (name, list) :: 
+                          then (name', (atomid, argpos) :: list) :: t
+                          else (name', list) :: 
                                (add_to_port_list name atomid argpos t)
   | [] => [(name, [(atomid, argpos)])]
   end.
@@ -1807,6 +1827,6 @@ Definition atom_list_to_port_list (atoms: list Atom) :=
               | (atomid, AAtom _ links) => add_atom_to_port_list atomid links a
               end) [] (add_indices O atoms).
 
-(* Definition term_to_port_list (t: Graph) := atom_list_to_port_list (term_to_atom_list t). *)
+Definition term_to_port_list (t: Graph) := atom_list_to_port_list (term_to_atom_list t).
 
 Definition count_atoms (t: Graph) := length (term_to_atom_list t).
