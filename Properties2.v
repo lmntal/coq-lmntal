@@ -58,4 +58,89 @@ Definition term_to_graph (term: LMNtalSyntax.Graph): LMNtalGraph2.Graph :=
   let atoms := term_to_atom_list term in
     (get_atomnum atoms, get_edges atoms, get_labeling atoms).
 
-Compute (term_to_graph {{"p" ("X", "Y"), "q" ("Y", "X")}}).
+(* Compute (term_to_graph {{"p" ("X", "Y"), "q" ("Y", "X")}}). *)
+
+Example ex_iso1: isomorphic
+  (term_to_graph {{"p" ("X", "Y"), "q" ("Y", "X")}})
+  (term_to_graph {{"q" ("A", "B"), "p" ("B", "A")}}).
+Proof.
+  exists [(0,1)]. simpl.
+  unfold term_to_graph. simpl.
+  unfold get_edges. simpl.
+  unfold swap_atomid_labels, swap. reflexivity.
+Qed.
+
+Definition swap_atomid_al i1 i2 (al: list Atom) :=
+  map (swap_atomid_atom i1 i2) al.
+
+Definition swap_atomid_list_al l (al: list (string * list (nat * nat))) :=
+  fold_right (fun x g => match x with
+                          | (i1, i2) => swap_atomid_al i1 i2 g
+                          end) G l.
+
+Definition strong_iso G G' :=
+  exists l, swap_atomid_list_al l (term_to_port_list G) = term_to_port_list G'.
+
+Lemma strong_iso_isomorphic:
+  forall G G', strong_iso G G' => isomorphic G G'.
+
+(* Fixpoint make_swap :  *)
+
+Lemma term_to_graph_swap :
+  forall P Q, exists l,
+    swap_atomid_list l (term_to_graph {{ P, Q }}) =
+    term_to_graph {{ Q, P }}.
+Proof.
+  intro P. induction P; intro Q.
+  - exists []. simpl.
+    unfold term_to_graph. simpl.
+    rewrite app_nil_r. reflexivity.
+  
+Admitted.
+
+Lemma get_atomnum_app:
+  forall l1 l2,
+    get_atomnum (l1 ++ l2)
+    = get_atomnum l1 + get_atomnum l2.
+Proof.
+  intros. induction l1; auto.
+  simpl. auto.
+Qed.
+
+Lemma swap_atomid_mol:
+  forall P P' Q,
+    (exists l, swap_atomid_list l (term_to_graph P) = term_to_graph P')
+    -> exists l, swap_atomid_list l (term_to_graph {{P,Q}}) = (term_to_graph {{P',Q}}).
+Proof.
+  intros.
+Admitted.
+
+Theorem cong_to_iso :
+  forall t1 t2,
+    cong t1 t2 -> isomorphic (term_to_graph t1) (term_to_graph t2).
+Proof.
+  intros.
+  unfold isomorphic.
+  rewrite congm_cong_iff in H.
+  induction H.
+  - exists []. simpl.
+    unfold term_to_graph. reflexivity.
+  - apply term_to_graph_swap.
+  - exists []. simpl.
+    unfold term_to_graph. simpl.
+    rewrite app_assoc. reflexivity.
+  - destruct IHcongm. exists x.
+    unfold term_to_graph. simpl.
+    unfold term_to_graph in H2.
+    repeat rewrite get_atomnum_app.
+
+  (* - exists []. simpl. *)
+    (* unfold term_to_graph. f_equal. f_equal.
+    + induction P; auto; simpl.
+      { destruct atom. reflexivity. }
+      repeat rewrite get_atomnum_app.
+      rewrite <- IHP1. *)
+
+
+
+

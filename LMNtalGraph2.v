@@ -5,6 +5,8 @@ Open Scope string_scope.
 Require Import List.
 Import ListNotations.
 Open Scope list_scope.
+Import PeanoNat.Nat.
+Open Scope nat_scope.
 
 Require Import ListSet.
 
@@ -14,7 +16,9 @@ Definition AtomId := nat.
 Definition ArgPos := nat.
 Definition AtomNum := nat.
 Definition Port: Type := AtomId * ArgPos.
+(* Inductive Port := local (atomid: AtomId) (argpos: ArgPos) | free (name: string). *)
 Definition Edge := set Port.
+(* Inductive Edge := local (ps: set Port) | free (name: string) (p: Port). *)
 Definition Graph: Type := AtomNum * (set Edge) * (list string).
 
 (* Definition injective {A B} (f: A->B) :=
@@ -24,27 +28,30 @@ Definition surjective {A B} (f: A->B) :=
 Definition bijective {A B} (f: A->B) :=
   injective f /\ surjective f. *)
 
-Definition Geq_dec: forall x y : Graph, {x=y} +{x<>y}.
+Definition Geq_dec: forall x y : Graph, {x=y} + {x<>y}.
 Proof.
   intros [[v1 e1] l1] [[v2 e2] l2].
   repeat decide equality.
 Defined.
 
-Definition Peq_dec: forall x y : Port, {x=y} +{x<>y}.
+Definition Peq_dec: forall x y : Port, {x=y} + {x<>y}.
 Proof.
   repeat decide equality.
 Defined.
 
-Definition Eeq_dec: forall x y : Edge, {x=y} +{x<>y}.
+Definition Eeq_dec: forall x y : Edge, {x=y} + {x<>y}.
 Proof.
-  repeat decide equality.
+  repeat decide equality.  
 Defined.
 
 Definition swap_atomid_port (i1 i2: nat) (p: Port) := 
   match p with
   | (atomid, argpos) =>
     (if PeanoNat.Nat.eq_dec i1 atomid
-      then i2 else atomid, argpos)
+      then i2
+      else if PeanoNat.Nat.eq_dec i2 atomid
+      then i1
+      else atomid, argpos)
   end.
 
 Definition swap_atomid_edge (i1 i2: nat) (e: Edge) :=
@@ -58,7 +65,9 @@ Definition swap_atomid_labels (i1 i2: nat) (l: list string) :=
 
 Definition swap_atomid (i1 i2: nat) (g: Graph) :=
   match g with (v, e, l) =>
-    (v, swap_atomid_edges i1 i2 e, swap_atomid_labels i1 i2 l)
+    if andb (i1 <? v) (i2 <? v) then
+      (v, swap_atomid_edges i1 i2 e, swap_atomid_labels i1 i2 l)
+    else g
   end.
 
 Definition swap_atomid_list l (G:Graph) :=

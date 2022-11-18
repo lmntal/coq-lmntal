@@ -1788,17 +1788,241 @@ Fixpoint term_to_atom_list (t: Graph) : list Atom :=
 Definition is_connector (a:Atom) :=
   Feq_dec (get_functor a) ("="/2).
 
-Fixpoint get_connectors (l: list Atom): list Atom * list Atom :=
+Fixpoint get_connectors (l: list Atom) :=
   match l with
   | [] => ([],[])
   | h::t =>
-    match h, (get_connectors t) with
-      (AAtom name links), (conns, atoms) =>
-        if is_connector h
-        then (conns, h::atoms)
-        else (h::conns, atoms)
+    let (conns, atoms) := (get_connectors t) in
+      match h with 
+      | {{ X=Y }} => ((X,Y)::conns, atoms)
+      | _ => (conns, h::atoms)
     end
   end.
+
+(* Def.1 *)
+Definition closed G :=
+  length (freelinks G) = 0.
+
+Example closed_ex1: ~ closed {{ "a"("X") }}.
+Proof.
+  unfold closed.
+  simpl. auto.
+Qed.
+
+Example closed_ex2: closed {{ "a"("X"), "b"("X") }}.
+Proof.
+  unfold closed.
+  simpl. auto.
+Qed.
+
+Fixpoint normal_sub G :=
+  match G with
+  | GZero => False
+  | GAtom a => get_functor a <> "="/2
+  | GMol g1 g2 => normal_sub g1 /\ normal_sub g2
+  end.
+
+Definition normal G := G = GZero \/ normal_sub G.
+
+Definition wfnormal G := wellformed_g G /\ normal G.
+
+Definition fuse_connector (c: Link * Link) g :=
+  let (X, Y) := c in {{g[Y/X]}}.
+
+Fixpoint make_graph atoms :=
+  match atoms with
+  | [] => GZero
+  | [a] => GAtom a
+  | h::t => let g := make_graph t in {{ h, g }}
+  end.
+
+Definition normalize g :=
+  let (conns, atoms) := get_connectors (term_to_atom_list g) in
+    fold_right fuse_connector (make_graph atoms) conns.
+
+Lemma connector_iff: forall c,
+  get_functor c = "="/2 <-> exists X Y, c = {{X=Y}}.
+Proof.
+  intros c. split; intros H; destruct c.
+  - simpl in H. inversion H.
+    destruct links0. { inversion H2. }
+    destruct links0. { inversion H2. }
+    destruct links0. { exists l,l0. auto. }
+    inversion H2.
+  - simpl. destruct H as [X [Y H]].
+    inversion H. auto.
+Qed.
+
+Lemma get_connectors_head1: forall X Y l c a,
+  get_connectors l = (c,a) ->
+  get_connectors ({{X=Y}}::l) = ((X,Y)::c,a).
+Proof.
+  intros.
+  simpl. rewrite H. auto.
+Qed.
+
+Lemma get_connectors_head2: forall h t c a,
+  get_functor h <> "="/2 ->
+  get_connectors t = (c,a) ->
+  get_connectors (h::t) = (c,h::a).
+Proof.
+  intros.
+  destruct h as [p l].
+  destruct p; simpl; rewrite H0; auto.
+  destruct a0.
+  destruct b; auto.
+  destruct b0; auto.
+  destruct b1; auto.
+  destruct b2; auto.
+  destruct b3; auto.
+  destruct b4; auto.
+  destruct b5; auto.
+  destruct b6; auto.
+  destruct p; auto.
+  destruct l as [|h1 t1]; auto.
+  destruct t1 as [|h2 t2]; auto.
+  destruct t2 as [|h3 t3]; auto.
+  exfalso. apply H. auto.
+Qed.
+
+Lemma get_connectors_al: forall l1 l2 c1 a1 c2 a2,
+  get_connectors l1 = (c1, a1) ->
+  get_connectors l2 = (c2, a2) ->
+  get_connectors (l1++l2) = (c1++c2,a1++a2).
+Proof.
+  intros l1.
+  induction l1.
+  - simpl. intros. inversion H. simpl. rewrite H0. auto.
+  - intros. rewrite <- app_comm_cons.
+    destruct (is_connector a).
+    + rewrite connector_iff in e.
+      destruct e as [X [Y e]].
+      rewrite e. rewrite e in H.
+      simpl in H.
+      destruct (get_connectors l1) as [c11 a11].
+      inversion H. simpl.
+      replace (get_connectors (l1 ++ l2)) with (c11++c2,a11++a2).
+      { rewrite H3. auto. }
+      symmetry. apply IHl1; auto.
+    + destruct (get_connectors l1) as [c11 a11] eqn:e.
+      assert (A: get_connectors (l1++l2) = (c11++c2,a11++a2)).
+      { apply IHl1; auto. }
+      assert (A1: get_connectors (a :: l1) = (c11,a::a11)).
+      { apply get_connectors_head2; auto. }
+      rewrite A1 in H. inversion H.
+      replace (get_connectors (a :: l1 ++ l2)) with (c11++c2,a::a11++a2).
+      { simpl. rewrite H2. auto. }
+      symmetry. apply get_connectors_head2; auto.
+Qed.
+
+Lemma normalization: forall g, wellformed_g g -> closed g ->
+  wfnormal (normalize g).
+Proof.
+  intros g WF C.
+  unfold normalize.
+  assert (A: wfnormal GZero).
+  { split.
+    - unfold wellformed_g. auto.
+    - unfold normal. auto. }
+  induction g; auto.
+  - destruct (is_connector atom); destruct atom as [p args].
+    + unfold get_functor in e.
+      inversion e.
+      simpl. destruct args as [|X [|Y [|Z]]];
+      try discriminate H1. auto.
+    + admit.
+  - simpl.
+    destruct (get_connectors (term_to_atom_list g1)) as [c1 a1] eqn:e1.
+    destruct (get_connectors (term_to_atom_list g2)) as [c2 a2] eqn:e2.
+    replace (get_connectors (term_to_atom_list g1 ++ term_to_atom_list g2)) with (c1++c2, a1++a2).
+    + admit.
+    + symmetry. apply get_connectors_al; auto.
+Admitted.
+
+Lemma normalization_closed: forall g, wellformed_g g -> closed g ->
+  g == (normalize g).
+Proof.
+  intros g WF C.
+  induction g; unfold normalize.
+  - simpl. apply cong_refl. auto.
+  -  destruct atom.
+Admitted. 
+
+Reserved Notation "p '==n' q" (at level 40).
+Inductive congn : Graph -> Graph -> Prop :=
+  | congn_E2 : forall P Q, wfnormal {{P, Q}} ->
+                {{P, Q}} ==n {{Q, P}}
+  | congn_E3 : forall P Q R, wfnormal {{P, (Q, R)}} -> 
+                {{P, (Q, R)}} ==n {{(P, Q), R}}
+  | congn_E4 : forall P X Y, wfnormal P -> wfnormal {{ P[Y/X] }} ->
+              In X (locallinks P) -> P ==n {{ P[Y/X] }}
+  | congn_E5 : forall P P' Q, wfnormal {{ P,Q }} -> wfnormal {{ P',Q }} ->
+                P ==n P' -> {{ P,Q }} ==n {{ P',Q }}
+  | congn_refl : forall P, wfnormal P ->
+                  P ==n P
+  | congn_trans : forall P Q R, wfnormal P -> wfnormal Q -> wfnormal R ->
+    P ==n Q -> Q ==n R -> P ==n R
+  | congn_sym : forall P Q, wfnormal P -> wfnormal Q -> 
+    P ==n Q -> Q ==n P
+  where "p '==n' q" := (congn p q).
+
+Lemma normal_inj: forall P Q, normal {{P,Q}} -> normal P /\ normal Q.
+Proof.
+  unfold normal. simpl. intros.
+  split; right; destruct H; try discriminate H;
+  destruct H; auto.
+Qed.
+
+Lemma cong_implies_congn: forall P Q,
+  closed P -> closed Q -> P == Q ->
+  normalize P ==n normalize Q.
+Proof.
+  intros P Q HP HQ H.
+  induction H; unfold normalize; simpl.
+  - apply congn_refl.
+Admitted.
+
+Lemma congn_congm_iff: forall P Q,
+  wfnormal P -> wfnormal Q ->
+    P ==m Q <-> P ==n Q.
+Proof.
+  intros P Q NP NQ.
+  split; intro H.
+  - induction H.
+    + destruct NP as [_ [[] _]].
+    + apply congn_E2; auto.
+    + apply congn_E3; auto.
+    + apply congn_E5; auto.
+      apply IHcongm; destruct NP, NQ; auto; unfold wfnormal; split.
+      * apply wellformed_g_inj in H as [HP HQ]; auto.
+      * apply normal_inj in H3 as [H3 _]; auto.
+      * apply wellformed_g_inj in H4 as [HP' _]; auto.
+      * apply normal_inj in H5 as [H5 _]; auto.
+    + destruct NQ as [_ []].
+    + destruct NP as [_ [[] _]]; auto.
+    + apply congn_refl; auto.
+    + apply congn_trans with (Q:=R); auto. ; admit.
+    + apply congn_sym; auto.
+  - induction H.
+    + apply congm_E2. destruct NP. auto.
+    + apply congm_E3. destruct NP. auto.
+    + apply congm_E5; destruct NP,NQ; auto.
+      apply IHcongn; unfold wfnormal; split.
+      * apply wellformed_g_inj in H2 as [H2 _]; auto.
+      * apply normal_inj in H3 as [H3 _]; auto.
+      * apply wellformed_g_inj in H4 as [H4 _]; auto.
+      * apply normal_inj in H5 as [H5 _]; auto.
+    + apply congm_refl; unfold wfnormal in H;
+      destruct H; auto.
+    + apply congm_trans with (Q:=Q); auto.
+      * unfold wfnormal in NP; destruct NP as [NP _]; auto.
+      * unfold wfnormal in H0; destruct H0 as [H0 _]; auto.
+      * unfold wfnormal in NQ; destruct NQ as [NQ _]; auto.
+    + apply congm_sym; auto.
+      * unfold wfnormal in H; destruct H as [H _]; auto.
+      * unfold wfnormal in H0; destruct H0 as [H0 _]; auto.
+Abort.
+
 
 (* TODO: fuse_connectors *)
 
