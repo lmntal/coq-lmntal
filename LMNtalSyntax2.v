@@ -1,28 +1,29 @@
-Require Import String.
-Open Scope string_scope.
 Require Import List.
 Import ListNotations.
 Open Scope list_scope.
+Require Import Nat.
+Open Scope nat_scope.
 
 Require Import Multiset.
 
-Definition Link := string.
+Definition LinkName := nat.
+Definition AtomName := nat.
 
 Inductive Atom : Type :=
-  | AAtom (name:string) (links:list Link)
-  | AConn (X: Link) (Y: Link).
+  | AAtom (name:AtomName) (links:list LinkName)
+  | AConn (X: LinkName) (Y: LinkName).
 
 Inductive Functor : Type :=
-  | FFunctor (name:string) (arity:nat).
+  | FFunctor (name:AtomName) (arity:nat).
 Notation "p / n" := (FFunctor p n).
 
-Definition Feq_dec: forall x y : Functor, {x=y} +{x<>y}.
-Proof. repeat decide equality. Defined.
+(* Definition Feq_dec: forall x y : Functor, {x=y} +{x<>y}.
+Proof. repeat decide equality. Defined. *)
 
 Definition get_functor (a:Atom) : Functor :=
   match a with
   | AAtom p ls => p / length ls
-  | AConn x y => "=" / 2
+  | AConn x y => 0 / 2
   end.
 
 Inductive Graph : Type :=
@@ -58,15 +59,15 @@ Notation "x ':-' y" := (React x y) (in custom lmntal at level 91, no associativi
 Notation "x ';' y" := (RMol x y) (in custom lmntal at level 92, left associativity) : lmntal_scope.
 Open Scope lmntal_scope.
 
-Check {{ "Y" }} : Link.
-Check {{ "p"("X","Y"),"q"("Y","X") }} : Graph.
-Check {{ "p"("X","Y"),"q"("Y","X") :- GZero }} : Rule.
-Check {{ "p"("X","Y"),"q"("Y","X") :- GZero; RZero }} : RuleSet.
+Check {{ 1 }} : LinkName.
+Check {{ 1(1,2),2(2,1) }} : Graph.
+Check {{ 1(1,2),2(2,1) :- GZero }} : Rule.
+Check {{ 1(1,2),2(2,1) :- GZero; RZero }} : RuleSet.
 
-Example get_functor_example: get_functor (AAtom "p" ["L";"L";"M";"M"]) = "p"/4.
+Example get_functor_example: get_functor (AAtom 1 [1;1;2;2]) = 1/4.
 Proof. reflexivity. Qed.
 
-Fixpoint remove_one (x: Link) (l: list Link) : bool * list Link :=
+Fixpoint remove_one (x: LinkName) (l: list LinkName) : bool * list LinkName :=
   match l with
   | [] => (false, [])
   | h::t => if h =? x then (true, t)
@@ -75,7 +76,7 @@ Fixpoint remove_one (x: Link) (l: list Link) : bool * list Link :=
     end
   end.
 
-Fixpoint links (g: Graph) : list Link := 
+Fixpoint links (g: Graph) : list LinkName := 
   match g with
   | GZero => []
   | GAtom a => match a with
@@ -85,32 +86,44 @@ Fixpoint links (g: Graph) : list Link :=
   | {{P,Q}} => links P ++ links Q
   end.
 
-Definition Leq_dec : forall x y : Link, {x=y} + {x<>y} := string_dec.
+Lemma Leq_dec : forall x y : LinkName, {x=y} + {x<>y}.
+Proof.
+  apply PeanoNat.Nat.eq_dec.
+Defined.
 
-Definition unique_links (g: Graph): list Link := nodup Leq_dec (links g).
+Global Hint Resolve Leq_dec : core.
+Hint Rewrite -> PeanoNat.Nat.eqb_refl : core.
 
-Definition list_to_multiset (l:list Link) : multiset Link :=
-  fold_right (fun x a => munion (SingletonBag eq Leq_dec x) a) (EmptyBag Link) l.
+Definition unique_links (g: Graph): list LinkName := nodup Leq_dec (links g).
+Global Hint Opaque unique_links : core.
+Global Hint Unfold unique_links : core.
 
-Definition link_multiset (g: Graph) : multiset Link :=
+Definition list_to_multiset (l:list LinkName) : multiset LinkName :=
+  fold_right (fun x a => munion (SingletonBag eq Leq_dec x) a) (EmptyBag LinkName) l.
+
+Definition link_multiset (g: Graph) : multiset LinkName :=
   list_to_multiset (links g).
 
-Definition freelinks (g: Graph) : list Link := filter 
+Definition freelinks (g: Graph) : list LinkName := filter 
   (fun x => Nat.eqb (multiplicity (link_multiset g) x) 1) (unique_links g).
 
-Definition locallinks (g: Graph) : list Link := filter
+Definition locallinks (g: Graph) : list LinkName := filter
   (fun x => Nat.eqb (multiplicity (link_multiset g) x) 2) (unique_links g).
 
-Compute freelinks {{ "p"("X","Y"),"q"("Y","X","F") }}.
-Compute locallinks {{ "p"("X","Y"),"q"("Y","X","F") }}.
+Compute freelinks {{ 1(1,2),2(2,1,3) }}.
+Compute locallinks {{ 1(1,2),2(2,1,3) }}.
+Global Hint Opaque freelinks locallinks : core.
+Global Hint Unfold freelinks locallinks : core.
 
 Lemma in_unique_links:
   forall g x, In x (unique_links g) <-> In x (links g).
 Proof.
   intros g x.
-  unfold unique_links.
+  (* unfold unique_links. *)
   apply nodup_In.
 Qed.
+
+Hint Rewrite -> in_unique_links : core.
 
 Require Import Coq.Logic.Eqdep_dec.
 Lemma Leq_dec_refl: 
@@ -141,26 +154,33 @@ Proof.
   - auto.
 Qed.
 
+Global Hint Resolve Leq_dec_refl Leq_dec_eq Leq_dec_neq : core.
+Hint Rewrite -> Leq_dec_refl : core.
+
 (* A graph is well-formed if each link name occurs at most twice in it *)
 Definition wellformed_g (g:Graph) : Prop :=
   forallb (fun x => Nat.leb (multiplicity (link_multiset g) x) 2) (unique_links g) = true.
+Global Hint Opaque wellformed_g : core.
+Global Hint Unfold wellformed_g : core.
+
+Hint Rewrite -> PeanoNat.Nat.leb_le : core.
+Hint Rewrite -> forallb_forall : core.
 
 Lemma wellformed_g_forall: forall g, wellformed_g g <->
   forall x, In x (links g) -> (multiplicity (link_multiset g) x) <= 2.
 Proof.
   intros g.
   split.
-  - intros H1 x H2.
-    unfold wellformed_g in H1. rewrite forallb_forall in H1.
+  - intros H1 x H2. unfold wellformed_g in H1.
+    rewrite forallb_forall in H1.
     apply in_unique_links in H2.
-    apply H1 in H2. rewrite PeanoNat.Nat.leb_le in H2.
-    apply H2.
-  - intros H1. unfold wellformed_g. rewrite forallb_forall.
+    apply H1 in H2. rewrite PeanoNat.Nat.leb_le in H2. auto.
+  - intros H1. unfold wellformed_g. autorewrite with core.
     intros x H2. rewrite PeanoNat.Nat.leb_le.
     apply H1. apply in_unique_links. apply H2.
 Qed.
 
-Fixpoint link_list_eqb (l1 l2 : list Link) : bool :=
+(* Fixpoint link_list_eqb (l1 l2 : list LinkName) : bool :=
   match l1,l2 with
   | [],[] => true
   | [],_ => false
@@ -168,9 +188,9 @@ Fixpoint link_list_eqb (l1 l2 : list Link) : bool :=
                 | (true, l) => link_list_eqb t1 l
                 | (false, _) => false
                 end
-  end.
+  end. *)
 
-Definition link_list_eq (l1 l2 : list Link) : Prop :=
+Definition link_list_eq (l1 l2 : list LinkName) : Prop :=
   meq (list_to_multiset l1) (list_to_multiset l2).
 
 Definition wellformed_r (r:Rule) : Prop :=
@@ -178,11 +198,12 @@ Definition wellformed_r (r:Rule) : Prop :=
   | {{lhs :- rhs}} => link_list_eq (freelinks lhs) (freelinks rhs)
   end.
 
-Definition substitute_link (Y X L : Link) :=
+Definition substitute_link (Y X L : LinkName) :=
   if L =? X then Y else L.
+Global Hint Unfold substitute_link : core.
 
 (* P[Y/X] *)
-Fixpoint substitute (Y X:Link) (P:Graph) : Graph :=
+Fixpoint substitute (Y X:LinkName) (P:Graph) : Graph :=
   match P with
   | GZero => GZero
   | GAtom a => GAtom (match a with
@@ -194,7 +215,7 @@ Fixpoint substitute (Y X:Link) (P:Graph) : Graph :=
 Notation "P [ Y / X ]" := (substitute Y X P) (in custom lmntal at level 40, left associativity) : lmntal_scope.
 
 Example substitute_example :
-  {{ ( "p"("X", "Y"), "q"("Y", "X") ) [ "L" / "X" ] }} = {{ "p"("L", "Y"), "q"("Y", "L") }}.
+  {{ ( 1(1, 2), 2(2, 1) ) [ 3 / 1 ] }} = {{ 1(3, 2), 2(2, 3) }}.
 Proof. reflexivity. Qed.
 
 Reserved Notation "p == q" (at level 40).
@@ -222,21 +243,26 @@ Inductive cong : Graph -> Graph -> Prop :=
   | cong_sym : forall P Q, wellformed_g P -> wellformed_g Q -> 
                   P == Q -> Q == P
   where "p '==' q" := (cong p q).
+Global Hint Resolve cong_refl cong_sym cong_E1 cong_E2 cong_E3 cong_E4 cong_E5 cong_E7 cong_E8 cong_E9 : core.
 
-Example cong_example : {{ "p"("X","X") }} == {{ "p"("Y","Y") }}.
+Example cong_example : {{ 1(1,1) }} == {{ 1(2,2) }}.
 Proof.
-  replace ({{ "p"("Y","Y") }}:Graph) with {{ "p"("X","X")["Y"/"X"] }}; auto.
-  apply cong_E4; unfold wellformed_g; auto.
-  simpl. auto.
+  replace ({{ 1(2,2) }}:Graph) with {{ 1(1,1)[2/1] }}; auto.
+  apply cong_E4; simpl; auto. 
 Qed.
 
+(* Ltac solve_refl :=
+  repeat (
+    autounfold
+  (* || autorewrite with core *)
+  || simpl); auto with *. *)
 Ltac solve_refl :=
   repeat (
     unfold wellformed_g, wellformed_r,
             freelinks, locallinks,
             unique_links, substitute_link
   || rewrite Leq_dec_refl
-  || rewrite eqb_refl
+  || rewrite PeanoNat.Nat.eqb_refl
   || simpl); auto.
 
 Example cong_example_var : forall p X Y, {{ p(X,X) }} == {{ p(Y,Y) }}.
@@ -2198,8 +2224,7 @@ Proof.
   intros P Q NP NQ.
   split; intro H.
   - induction H.
-    + destruct NP. destruct H1; inversion H1.
-      simpl in H2. destruct H2. 
+    + destruct NP as [_ [[] _]].
     + apply congn_E2; auto.
     + apply congn_E3; auto.
     + apply congn_E5; auto.
@@ -2208,10 +2233,10 @@ Proof.
       * apply normal_inj in H3 as [H3 _]; auto.
       * apply wellformed_g_inj in H4 as [HP' _]; auto.
       * apply normal_inj in H5 as [H5 _]; auto.
-    (* + destruct NP.
+    + destruct NQ as [_ []].
     + destruct NP as [_ [[] _]]; auto.
     + apply congn_refl; auto.
-    + apply congn_trans with (Q:=R); auto.
+    + apply congn_trans with (Q:=R); auto. ; admit.
     + apply congn_sym; auto.
   - induction H.
     + apply congm_E2. destruct NP. auto.
@@ -2230,9 +2255,8 @@ Proof.
       * unfold wfnormal in NQ; destruct NQ as [NQ _]; auto.
     + apply congm_sym; auto.
       * unfold wfnormal in H; destruct H as [H _]; auto.
-      * unfold wfnormal in H0; destruct H0 as [H0 _]; auto. *)
+      * unfold wfnormal in H0; destruct H0 as [H0 _]; auto.
 Abort.
-
 
 
 (* TODO: fuse_connectors *)
