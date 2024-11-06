@@ -4,6 +4,23 @@ Require Import List.
 Import ListNotations.
 Open Scope list_scope.
 
+Inductive seq := Empty | Seq (h:nat) (t : seq).
+
+Fixpoint append l1 l2 :=
+  match l1 with
+  | Seq h t => Seq h (append t l2)
+  | Empty => l2
+  end.
+
+Theorem seq_empty: forall xs, append xs Empty = xs.
+Proof.
+  intro xs. induction xs as [|h t IH].
+  - auto.
+  - simpl. f_equal. auto.
+    (* rewrite IH. auto. *)
+Qed.
+
+
 Fixpoint subst_nth {A} n (x:A) l :=
   match l with 
   | h :: t => if PeanoNat.Nat.eq_dec n 0
@@ -46,3 +63,43 @@ Proof.
   - f_equal. apply UIP_dec, PeanoNat.Nat.eq_dec.
   - congruence.
 Qed.
+
+Import PeanoNat.Nat.
+Open Scope nat_scope.
+
+(* https://stackoverflow.com/questions/62464821/how-to-make-an-inverse-function-in-coq *)
+(* Require Import Coq.Logic.Description.
+Require Import Coq.Logic.FunctionalExtensionality.
+
+Definition injective {X Y : Set} (f : X -> Y) := forall x y, f x = f y -> x = y.
+Definition surjective {X Y : Set} (f : X -> Y) := forall y, exists x, f x = y.
+Definition bijective {X Y : Set} (f : X -> Y) := injective f /\ surjective f.
+
+Lemma inverse {X Y : Set} (f : X -> Y) :
+  bijective f -> {g : Y -> X | (forall x, g (f x) = x) /\
+                               (forall y, f (g y) = y) }.
+Proof.
+intros [inj sur].
+apply constructive_definite_description.
+assert (H : forall y, exists! x, f x = y).
+{ intros y.
+  destruct (sur y) as [x xP].
+  exists x; split; trivial.
+  intros x' x'P.
+  now apply inj; rewrite xP, x'P. }
+exists (fun y => proj1_sig (constructive_definite_description _ (H y))).
+split.
+- split.
+  + intros x.
+    destruct (constructive_definite_description _ _).
+    simpl.
+    now apply inj.
+  + intros y.
+    now destruct (constructive_definite_description _ _).
+- intros g' [H1 H2].
+  apply functional_extensionality.
+  intros y.
+  destruct (constructive_definite_description _ _) as [x e].
+  simpl.
+  now rewrite <- e, H1.
+Qed. *)

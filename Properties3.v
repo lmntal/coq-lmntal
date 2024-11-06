@@ -11,3 +11,6 @@ From LMNTAL Require Export LMNtalGraph2.
 From LMNTAL Require Export Util.
 
 
+Theorem congn_iso: forall g1 g2
+  normal g1 -> normal g2 -> 
+  g1 ==n g2 -> .
