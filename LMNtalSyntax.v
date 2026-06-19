@@ -6,6 +6,10 @@ Open Scope list_scope.
 
 Require Import Multiset.
 
+Require Import Stdlib.Logic.Eqdep_dec.
+Require Import Stdlib.Logic.ClassicalDescription.
+Require Import Stdlib.Sorting.Permutation.
+
 Definition Link := string.
 
 Inductive Atom : Type :=
@@ -16,7 +20,7 @@ Inductive Functor : Type :=
   | FFunctor (name:string) (arity:nat).
 Notation "p / n" := (FFunctor p n).
 
-Definition Feq_dec: forall x y : Functor, {x=y} +{x<>y}.
+Definition Feq_dec: forall x y : Functor, {x=y} + {x<>y}.
 Proof. repeat decide equality. Defined.
 
 Definition get_functor (a:Atom) : Functor :=
@@ -25,13 +29,13 @@ Definition get_functor (a:Atom) : Functor :=
   | AConn x y => "=" / 2
   end.
 
-Inductive Graph : Type :=
-  | GZero 
-  | GAtom (atom:Atom)
-  | GMol (g1 g2:Graph).
+Inductive Term : Type :=
+  | TZero 
+  | TAtom (atom:Atom)
+  | TMol (g1 g2:Term).
 
 Inductive Rule : Type :=
-  | React (lhs rhs:Graph).
+  | React (lhs rhs:Term).
 
 Inductive RuleSet : Type :=
   | RZero
@@ -39,7 +43,7 @@ Inductive RuleSet : Type :=
   | RMol (r1 r2:RuleSet).
 
 Coercion RRule : Rule >-> RuleSet.
-Coercion GAtom : Atom >-> Graph.
+Coercion TAtom : Atom >-> Term.
 
 Declare Custom Entry lmntal.
 Declare Scope lmntal_scope.
@@ -53,15 +57,15 @@ Notation "p ( x , .. , y )" := (AAtom p (cons x .. (cons y nil) .. ))
 Notation "p ()" := (AAtom p nil) (in custom lmntal at level 0,
                                   p constr at level 0) : lmntal_scope.
 Notation "x = y" := (AConn x y) (in custom lmntal at level 40, left associativity) : lmntal_scope.
-Notation "x , y" := (GMol x y) (in custom lmntal at level 90, left associativity) : lmntal_scope.
+Notation "x , y" := (TMol x y) (in custom lmntal at level 90, left associativity) : lmntal_scope.
 Notation "x ':-' y" := (React x y) (in custom lmntal at level 91, no associativity) : lmntal_scope.
 Notation "x ';' y" := (RMol x y) (in custom lmntal at level 92, left associativity) : lmntal_scope.
 Open Scope lmntal_scope.
 
 Check {{ "Y" }} : Link.
-Check {{ "p"("X","Y"),"q"("Y","X") }} : Graph.
-Check {{ "p"("X","Y"),"q"("Y","X") :- GZero }} : Rule.
-Check {{ "p"("X","Y"),"q"("Y","X") :- GZero; RZero }} : RuleSet.
+Check {{ "p"("X","Y"),"q"("Y","X") }} : Term.
+Check {{ "p"("X","Y"),"q"("Y","X") :- TZero }} : Rule.
+Check {{ "p"("X","Y"),"q"("Y","X") :- TZero; RZero }} : RuleSet.
 
 Example get_functor_example: get_functor (AAtom "p" ["L";"L";"M";"M"]) = "p"/4.
 Proof. reflexivity. Qed.
@@ -75,10 +79,10 @@ Fixpoint remove_one (x: Link) (l: list Link) : bool * list Link :=
     end
   end.
 
-Fixpoint links (g: Graph) : list Link := 
+Fixpoint links (g: Term) : list Link := 
   match g with
-  | GZero => []
-  | GAtom a => match a with
+  | TZero => []
+  | TAtom a => match a with
     | AAtom p args => args
     | AConn x y => [x;y]
     end
@@ -87,18 +91,18 @@ Fixpoint links (g: Graph) : list Link :=
 
 Definition Leq_dec : forall x y : Link, {x=y} + {x<>y} := string_dec.
 
-Definition unique_links (g: Graph): list Link := nodup Leq_dec (links g).
+Definition unique_links (g: Term): list Link := nodup Leq_dec (links g).
 
 Definition list_to_multiset (l:list Link) : multiset Link :=
   fold_right (fun x a => munion (SingletonBag eq Leq_dec x) a) (EmptyBag Link) l.
 
-Definition link_multiset (g: Graph) : multiset Link :=
+Definition link_multiset (g: Term) : multiset Link :=
   list_to_multiset (links g).
 
-Definition freelinks (g: Graph) : list Link := filter 
+Definition freelinks (g: Term) : list Link := filter 
   (fun x => Nat.eqb (multiplicity (link_multiset g) x) 1) (unique_links g).
 
-Definition locallinks (g: Graph) : list Link := filter
+Definition locallinks (g: Term) : list Link := filter
   (fun x => Nat.eqb (multiplicity (link_multiset g) x) 2) (unique_links g).
 
 Compute freelinks {{ "p"("X","Y"),"q"("Y","X","F") }}.
@@ -112,7 +116,6 @@ Proof.
   apply nodup_In.
 Qed.
 
-Require Import Coq.Logic.Eqdep_dec.
 Lemma Leq_dec_refl: 
   forall X, Leq_dec X X = left eq_refl.
 Proof.
@@ -142,20 +145,20 @@ Proof.
 Qed.
 
 (* A graph is well-formed if each link name occurs at most twice in it *)
-Definition wellformed_g (g:Graph) : Prop :=
+Definition wellformed_t (g:Term) : Prop :=
   forallb (fun x => Nat.leb (multiplicity (link_multiset g) x) 2) (unique_links g) = true.
 
-Lemma wellformed_g_forall: forall g, wellformed_g g <->
+Lemma wellformed_t_forall: forall g, wellformed_t g <->
   forall x, In x (links g) -> (multiplicity (link_multiset g) x) <= 2.
 Proof.
   intros g.
   split.
   - intros H1 x H2.
-    unfold wellformed_g in H1. rewrite forallb_forall in H1.
+    unfold wellformed_t in H1. rewrite forallb_forall in H1.
     apply in_unique_links in H2.
     apply H1 in H2. rewrite PeanoNat.Nat.leb_le in H2.
     apply H2.
-  - intros H1. unfold wellformed_g. rewrite forallb_forall.
+  - intros H1. unfold wellformed_t. rewrite forallb_forall.
     intros x H2. rewrite PeanoNat.Nat.leb_le.
     apply H1. apply in_unique_links. apply H2.
 Qed.
@@ -182,14 +185,14 @@ Definition substitute_link (Y X L : Link) :=
   if L =? X then Y else L.
 
 (* P[Y/X] *)
-Fixpoint substitute (Y X:Link) (P:Graph) : Graph :=
+Fixpoint substitute (Y X:Link) (P:Term) : Term :=
   match P with
-  | GZero => GZero
-  | GAtom a => GAtom (match a with
+  | TZero => TZero
+  | TAtom a => TAtom (match a with
     | AAtom p args => AAtom p (map (substitute_link Y X) args)
     | AConn a b => AConn (substitute_link Y X a) (substitute_link Y X b)
     end)
-  | {{P,Q}} => GMol (substitute Y X P) (substitute Y X Q)
+  | {{P,Q}} => TMol (substitute Y X P) (substitute Y X Q)
   end.
 Notation "P [ Y / X ]" := (substitute Y X P) (in custom lmntal at level 40, left associativity) : lmntal_scope.
 
@@ -198,41 +201,41 @@ Example substitute_example :
 Proof. reflexivity. Qed.
 
 Reserved Notation "p == q" (at level 40).
-Inductive cong : Graph -> Graph -> Prop :=
-  | cong_E1 : forall P, wellformed_g P ->
-              {{GZero, P}} == P
-  | cong_E2 : forall P Q, wellformed_g {{P, Q}} -> 
+Inductive cong : Term -> Term -> Prop :=
+  | cong_E1 : forall P, wellformed_t P ->
+              {{TZero, P}} == P
+  | cong_E2 : forall P Q, wellformed_t {{P, Q}} -> 
               {{P, Q}} == {{Q, P}}
-  | cong_E3 : forall P Q R, wellformed_g {{P, (Q, R)}} -> 
+  | cong_E3 : forall P Q R, wellformed_t {{P, (Q, R)}} -> 
               {{P, (Q, R)}} == {{(P, Q), R}}
-  | cong_E4 : forall P X Y, wellformed_g P -> wellformed_g {{ P[Y/X] }} ->
+  | cong_E4 : forall P X Y, wellformed_t P -> wellformed_t {{ P[Y/X] }} ->
               In X (locallinks P) -> P == {{ P[Y/X] }}
-  | cong_E5 : forall P P' Q, wellformed_g {{ P,Q }} -> wellformed_g {{ P',Q }} ->
+  | cong_E5 : forall P P' Q, wellformed_t {{ P,Q }} -> wellformed_t {{ P',Q }} ->
               P == P' -> {{ P,Q }} == {{ P',Q }}
-  | cong_E7 : forall X, {{ X = X }} == GZero
+  | cong_E7 : forall X, {{ X = X }} == TZero
   | cong_E8 : forall X Y, {{ X = Y }} == {{ Y = X }}
   | cong_E9 : forall X Y (A:Atom),
-              wellformed_g {{ X = Y, A }} -> wellformed_g {{ A[Y/X] }} ->
+              wellformed_t {{ X = Y, A }} -> wellformed_t {{ A[Y/X] }} ->
               In X (freelinks A) ->
               {{ X = Y, A }} == {{ A[Y/X] }}
-  | cong_refl : forall P, wellformed_g P ->
+  | cong_refl : forall P, wellformed_t P ->
                   P == P
-  | cong_trans : forall P Q R, wellformed_g P -> wellformed_g Q -> wellformed_g R ->
+  | cong_trans : forall P Q R, wellformed_t P -> wellformed_t Q -> wellformed_t R ->
                   P == Q -> Q == R -> P == R
-  | cong_sym : forall P Q, wellformed_g P -> wellformed_g Q -> 
+  | cong_sym : forall P Q, wellformed_t P -> wellformed_t Q -> 
                   P == Q -> Q == P
   where "p '==' q" := (cong p q).
 
 Example cong_example : {{ "p"("X","X") }} == {{ "p"("Y","Y") }}.
 Proof.
-  replace ({{ "p"("Y","Y") }}:Graph) with {{ "p"("X","X")["Y"/"X"] }}; auto.
-  apply cong_E4; unfold wellformed_g; auto.
+  replace ({{ "p"("Y","Y") }}:Term) with {{ "p"("X","X")["Y"/"X"] }}; auto.
+  apply cong_E4; unfold wellformed_t; auto.
   simpl. auto.
 Qed.
 
 Ltac solve_refl :=
   repeat (
-    unfold wellformed_g, wellformed_r,
+    unfold wellformed_t, wellformed_r,
             freelinks, locallinks,
             unique_links, substitute_link
   || rewrite Leq_dec_refl
@@ -242,15 +245,15 @@ Ltac solve_refl :=
 Example cong_example_var : forall p X Y, {{ p(X,X) }} == {{ p(Y,Y) }}.
 Proof.
   intros p X Y.
-  replace ({{ p(Y,Y) }}:Graph) with {{ p(X,X)[Y/X] }}.
+  replace ({{ p(Y,Y) }}:Term) with {{ p(X,X)[Y/X] }}.
   - apply cong_E4; solve_refl.
   - solve_refl.
 Qed.
 
 Reserved Notation "p '-[' r ']->' q" (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
-Inductive rrel : Rule -> Graph -> Graph -> Prop :=
+Inductive rrel : Rule -> Term -> Term -> Prop :=
   | rrel_R1 : forall G1 G1' G2 r,
-                wellformed_g {{G1,G2}} -> wellformed_g {{G1',G2}} ->
+                wellformed_t {{G1,G2}} -> wellformed_t {{G1',G2}} ->
                 wellformed_r r ->
                 G1 -[ r ]-> G1' -> {{G1,G2}} -[ r ]-> {{G1',G2}}
   | rrel_R3 : forall G1 G1' G2 G2' r,
@@ -258,19 +261,19 @@ Inductive rrel : Rule -> Graph -> Graph -> Prop :=
                 G2 == G1 -> G1' == G2' ->
                 G1 -[ r ]-> G1' -> G2 -[ r ]-> G2'
   | rrel_R6 : forall T U,
-                wellformed_g T -> wellformed_g U ->
+                wellformed_t T -> wellformed_t U ->
                 wellformed_r {{ T :- U }} ->
                 T -[ T :- U ]-> U
   where "p '-[' r ']->' q" := (rrel r p q).
 
 Reserved Notation "p '-[' r ']->*' q" (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
-Inductive rrel_rep : Rule -> Graph -> Graph -> Prop :=
+Inductive rrel_rep : Rule -> Term -> Term -> Prop :=
   | rrel_rep_refl : forall r a b, a == b -> a -[ r ]->* b
   | rrel_rep_step : forall r a b c, a -[ r ]->* b -> b -[ r ]-> c -> a -[ r ]->* c
   where "p '-[' r ']->*' q" := (rrel_rep r p q).
 
 Reserved Notation "p '=[' r ']=>' q" (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
-Fixpoint rrel_ruleset (rs : RuleSet) (p q : Graph) : Prop :=
+Fixpoint rrel_ruleset (rs : RuleSet) (p q : Term) : Prop :=
   match rs with
   | RZero => False
   | RRule r => p -[ r ]-> q
@@ -279,7 +282,7 @@ Fixpoint rrel_ruleset (rs : RuleSet) (p q : Graph) : Prop :=
   where "p '=[' rs ']=>' q" := (rrel_ruleset rs p q).
 
 Reserved Notation "p '=[' r ']=>*' q" (at level 40, r custom lmntal at level 99, p constr, q constr at next level).
-Inductive rrel_ruleset_rep : RuleSet -> Graph -> Graph -> Prop :=
+Inductive rrel_ruleset_rep : RuleSet -> Term -> Term -> Prop :=
   | rrel_ruleset_rep_refl : forall rs a b, a == b -> a =[ rs ]=>* b
   | rrel_ruleset_rep_step : forall rs a b c, a =[ rs ]=>* b -> b =[ rs ]=> c -> a =[ rs ]=>* c
   where "p '=[' r ']=>*' q" := (rrel_ruleset_rep r p q).
@@ -291,20 +294,20 @@ Example rrel_example :
 Proof.
   apply rrel_R3 with (G1:={{"b" ("X"), "c" ("X"), "a" ()}}) (G1':={{"d" (), "a" ()}}).
   - unfold wellformed_r. unfold link_list_eq. simpl. apply meq_refl.
-  - apply cong_trans with (Q:={{"a"(),("b"("Z"),"c"("Z"))}}); unfold wellformed_g; auto.
-    + apply cong_sym; unfold wellformed_g; auto.
-      apply cong_E3; unfold wellformed_g; auto.
-    + apply cong_trans with (Q:={{"b" ("Z"), "c" ("Z"), "a" ()}}); unfold wellformed_g; auto.
-      * apply cong_E2; unfold wellformed_g; auto.
+  - apply cong_trans with (Q:={{"a"(),("b"("Z"),"c"("Z"))}}); unfold wellformed_t; auto.
+    + apply cong_sym; unfold wellformed_t; auto.
+      apply cong_E3; unfold wellformed_t; auto.
+    + apply cong_trans with (Q:={{"b" ("Z"), "c" ("Z"), "a" ()}}); unfold wellformed_t; auto.
+      * apply cong_E2; unfold wellformed_t; auto.
       * assert (H1: {{"b"("X"), "c"("X"), "a"()}}={{("b"("Z"), "c"("Z"),"a"())["X"/"Z"] }}).
         { reflexivity. }
         rewrite H1.
-        apply cong_E4; unfold wellformed_g; auto.
+        apply cong_E4; unfold wellformed_t; auto.
         simpl. auto.
-  - apply cong_E2; unfold wellformed_g; auto.
-  - apply rrel_R1; unfold wellformed_g; auto.
+  - apply cong_E2; unfold wellformed_t; auto.
+  - apply rrel_R1; unfold wellformed_t; auto.
     + unfold wellformed_r. unfold link_list_eq. simpl. apply meq_refl.
-    + apply rrel_R6; unfold wellformed_g; auto.
+    + apply rrel_R6; unfold wellformed_t; auto.
       unfold wellformed_r. unfold link_list_eq. simpl. apply meq_refl.
 Qed.
 
@@ -401,7 +404,7 @@ Lemma link_multiset_mol:
 Proof.
   intros G1. destruct G1.
   - intros G2. unfold link_multiset.
-    replace (links GZero) with ([]:list Link).
+    replace (links TZero) with ([]:list Link).
     + simpl. apply munion_empty_left.
     + reflexivity.
   - intros G2. unfold link_multiset. destruct atom; simpl.
@@ -447,29 +450,29 @@ Proof.
   - reflexivity.
 Qed.
 
-Lemma wellformed_g_inj:
-  forall G1 G2, wellformed_g {{G1,G2}} -> wellformed_g G1 /\ wellformed_g G2.
+Lemma wellformed_t_inj:
+  forall G1 G2, wellformed_t {{G1,G2}} -> wellformed_t G1 /\ wellformed_t G2.
 Proof.
   intros G1 G2 H.
-  rewrite wellformed_g_forall in H.
+  rewrite wellformed_t_forall in H.
   split.
-  - rewrite wellformed_g_forall. intros x H1.
+  - rewrite wellformed_t_forall. intros x H1.
     apply PeanoNat.Nat.le_trans with (multiplicity (link_multiset {{G1, G2}}) x).
     + apply multiplicity_munionL with (link_multiset G2).
       apply link_multiset_mol.
     + apply H. rewrite links_mol. left. apply H1.
-  - rewrite wellformed_g_forall. intros x H1.
+  - rewrite wellformed_t_forall. intros x H1.
     apply PeanoNat.Nat.le_trans with (multiplicity (link_multiset {{G1, G2}}) x).
     + apply multiplicity_munionR with (link_multiset G1).
       apply link_multiset_mol.
     + apply H. rewrite links_mol. right. apply H1.
 Qed.
 
-Lemma connector_wellformed_g :
-  forall X Y, wellformed_g {{ X = Y }}.
+Lemma connector_wellformed_t :
+  forall X Y, wellformed_t {{ X = Y }}.
 Proof.
   intros X Y.
-  unfold wellformed_g.
+  unfold wellformed_t.
   unfold unique_links.
   unfold nodup.
   simpl.
@@ -498,7 +501,8 @@ Proof.
         apply le_0_n.
       * apply IHl in H.
         rewrite PeanoNat.Nat.add_comm.
-        apply Plus.le_plus_trans.
+        apply Arith_base.le_plus_trans_stt.
+        (* apply Plus.le_plus_trans. *)
         apply H.
     + destruct (Leq_dec a x).
       * left. auto.
@@ -506,14 +510,14 @@ Proof.
         apply H.
 Qed.
 
-Lemma wellformed_g_link_multiset:
+Lemma wellformed_t_link_multiset:
   forall P Q,
     meq (link_multiset P) (link_multiset Q) ->
-    wellformed_g P -> wellformed_g Q.
+    wellformed_t P -> wellformed_t Q.
 Proof.
   intros P Q H.
-  rewrite wellformed_g_forall.
-  rewrite wellformed_g_forall.
+  rewrite wellformed_t_forall.
+  rewrite wellformed_t_forall.
   intros HP x Hx.
   unfold meq in H. rewrite <- H.
   apply HP.
@@ -565,30 +569,30 @@ Proof.
   apply meq_sym. apply link_multiset_mol.
 Qed.
 
-Lemma cong_wellformed_g :
-  forall P Q, P == Q -> wellformed_g P /\ wellformed_g Q.
+Lemma cong_wellformed_t :
+  forall P Q, P == Q -> wellformed_t P /\ wellformed_t Q.
 Proof.
   intros P Q H.
   induction H; auto; split; auto.
-  - apply wellformed_g_link_multiset with {{P,Q}}; auto.
+  - apply wellformed_t_link_multiset with {{P,Q}}; auto.
     apply link_multiset_swap.
-  - apply wellformed_g_link_multiset with {{P,(Q,R)}}; auto.
+  - apply wellformed_t_link_multiset with {{P,(Q,R)}}; auto.
     apply link_multiset_assoc.
-  - apply connector_wellformed_g.
-  - unfold wellformed_g.
+  - apply connector_wellformed_t.
+  - unfold wellformed_t.
     simpl. auto.
-  - apply connector_wellformed_g.
-  - apply connector_wellformed_g.
+  - apply connector_wellformed_t.
+  - apply connector_wellformed_t.
 Qed.
 
 Lemma rrel_wellformed :
   forall P Q r, P -[ r ]-> Q ->
-    wellformed_g P /\ wellformed_g Q /\ wellformed_r r.
+    wellformed_t P /\ wellformed_t Q /\ wellformed_r r.
 Proof.
   intros P Q r H.
   induction H; auto.
-  apply cong_wellformed_g in H0.
-  apply cong_wellformed_g in H1.
+  apply cong_wellformed_t in H0.
+  apply cong_wellformed_t in H1.
   destruct H0. destruct H1.
   auto.
 Qed.
@@ -602,8 +606,8 @@ Proof.
   induction H.
   - apply rrel_R1; auto.
   - apply rrel_R3 with (G1') (G1); auto.
-    + apply cong_sym; auto; apply cong_wellformed_g in H1; destruct H1; auto.
-    + apply cong_sym; auto; apply cong_wellformed_g in H0; destruct H0; auto.
+    + apply cong_sym; auto; apply cong_wellformed_t in H1; destruct H1; auto.
+    + apply cong_sym; auto; apply cong_wellformed_t in H0; destruct H0; auto.
   - apply rrel_R6; auto.
 Qed.
 
@@ -624,25 +628,25 @@ Proof.
 Qed.
 
 Reserved Notation "p '==m' q" (at level 40).
-Inductive congm : Graph -> Graph -> Prop :=
-  | congm_E1 : forall P, wellformed_g P ->
-                {{GZero, P}} ==m P
-  | congm_E2 : forall P Q, wellformed_g {{P, Q}} ->
+Inductive congm : Term -> Term -> Prop :=
+  | congm_E1 : forall P, wellformed_t P ->
+                {{TZero, P}} ==m P
+  | congm_E2 : forall P Q, wellformed_t {{P, Q}} ->
                 {{P, Q}} ==m {{Q, P}}
-  | congm_E3 : forall P Q R, wellformed_g {{P, (Q, R)}} -> 
+  | congm_E3 : forall P Q R, wellformed_t {{P, (Q, R)}} -> 
                 {{P, (Q, R)}} ==m {{(P, Q), R}}
-  | congm_E5 : forall P P' Q, wellformed_g {{ P,Q }} -> wellformed_g {{ P',Q }} ->
+  | congm_E5 : forall P P' Q, wellformed_t {{ P,Q }} -> wellformed_t {{ P',Q }} ->
                 P ==m P' -> {{ P,Q }} ==m {{ P',Q }}
-  | congm_E7 : forall X, {{ X = X }} ==m GZero
+  | congm_E7 : forall X, {{ X = X }} ==m TZero
   | congm_E9 : forall X Y (A:Atom), 
-                wellformed_g {{ X = Y, A }} -> wellformed_g {{ A[Y/X] }} ->
+                wellformed_t {{ X = Y, A }} -> wellformed_t {{ A[Y/X] }} ->
                 In X (freelinks A) ->
                 {{ X = Y, A }} ==m {{ A[Y/X] }}
-  | congm_refl : forall P, wellformed_g P ->
+  | congm_refl : forall P, wellformed_t P ->
                   P ==m P
-  | congm_trans : forall P Q R, wellformed_g P -> wellformed_g Q -> wellformed_g R ->
+  | congm_trans : forall P Q R, wellformed_t P -> wellformed_t Q -> wellformed_t R ->
     P ==m Q -> Q ==m R -> P ==m R
-  | congm_sym : forall P Q, wellformed_g P -> wellformed_g Q -> 
+  | congm_sym : forall P Q, wellformed_t P -> wellformed_t Q -> 
     P ==m Q -> Q ==m P
   where "p '==m' q" := (congm p q).
 
@@ -719,17 +723,17 @@ Qed.
 
 Lemma congm_E8_sub :
   forall X Y Z, X <> Z -> Y <> Z ->
-    wellformed_g {{ Z=X, Z=Y }} ->
+    wellformed_t {{ Z=X, Z=Y }} ->
     {{ Z=X, Z=Y }} ==m {{ X=Y }}.
 Proof.
   intros X Y Z Hxz Hyz H.
   destruct (Leq_dec Y Z) eqn:EYZ.
   { congruence. }
   apply congm_trans with {{ (Z=Y)[X/Z] }}; auto.
-  - apply connector_wellformed_g.
-  - apply connector_wellformed_g.
+  - apply connector_wellformed_t.
+  - apply connector_wellformed_t.
   - apply congm_E9; auto.
-    { simpl. apply connector_wellformed_g. }
+    { simpl. apply connector_wellformed_t. }
     unfold freelinks.
     simpl. unfold unique_links.
     simpl. rewrite EYZ.
@@ -738,7 +742,7 @@ Proof.
   - simpl. solve_refl.
     replace (Y =? Z) with false.
     + apply congm_refl.
-      apply connector_wellformed_g.
+      apply connector_wellformed_t.
     + symmetry. apply eqb_neq. apply n.
 Qed.
 
@@ -765,21 +769,21 @@ Proof.
     + exists "X". auto.
 Qed.
 
-Lemma wellformed_g_swap :
-  forall P Q, wellformed_g {{P,Q}} -> wellformed_g {{Q,P}}.
+Lemma wellformed_t_swap :
+  forall P Q, wellformed_t {{P,Q}} -> wellformed_t {{Q,P}}.
 Proof.
   intros P Q H.
-  apply wellformed_g_link_multiset with {{P,Q}}.
+  apply wellformed_t_link_multiset with {{P,Q}}.
   - apply link_multiset_swap.
   - auto.
 Qed.
 
-Lemma wellformed_g_zx_zy:
+Lemma wellformed_t_zx_zy:
   forall X Y Z,
-    X <> Z -> Y <> Z -> wellformed_g {{Z = X, Z = Y}}.
+    X <> Z -> Y <> Z -> wellformed_t {{Z = X, Z = Y}}.
 Proof.
   intros X Y Z Hxz Hyz.
-  apply wellformed_g_forall.
+  apply wellformed_t_forall.
   intros L H1. simpl in H1. simpl.
   destruct H1 as [H1|[H1|[H1|[H1|[]]]]]; rewrite <- H1;
   rewrite Leq_dec_refl.
@@ -805,21 +809,21 @@ Proof.
   { apply get_fresh_link_X_Y. }
   destruct AZ as [Z].
   destruct H.
-  assert (WF: wellformed_g {{Z = X, Z = Y}}).
-  { apply wellformed_g_zx_zy; auto. }
+  assert (WF: wellformed_t {{Z = X, Z = Y}}).
+  { apply wellformed_t_zx_zy; auto. }
   apply congm_trans with {{ Z=X, Z=Y }}.
-  - apply connector_wellformed_g.
+  - apply connector_wellformed_t.
   - apply WF. 
-  - apply connector_wellformed_g.
+  - apply connector_wellformed_t.
   - apply congm_sym; auto.
-    + apply connector_wellformed_g.
+    + apply connector_wellformed_t.
     + apply congm_E8_sub; auto.
   - apply congm_trans with {{ Z=Y,Z=X }}; auto.
-    + apply wellformed_g_swap. auto.
-    + apply connector_wellformed_g.
+    + apply wellformed_t_swap. auto.
+    + apply connector_wellformed_t.
     + apply congm_E2. auto.
     + apply congm_E8_sub; auto.
-      apply wellformed_g_swap. auto.
+      apply wellformed_t_swap. auto.
 Qed.
 
 Lemma sum_2 :
@@ -1088,14 +1092,14 @@ Proof.
     rewrite IHP1, IHP2. reflexivity.
 Qed.
 
-Lemma subst_wellformed_g :
+Lemma subst_wellformed_t :
   forall X Y P,
-    wellformed_g P ->
+    wellformed_t P ->
     multiplicity (link_multiset P) X + multiplicity (link_multiset P) Y <= 2 ->
-    wellformed_g {{ P[Y/X] }}.
+    wellformed_t {{ P[Y/X] }}.
 Proof.
   intros X Y P.
-  rewrite !wellformed_g_forall.
+  rewrite !wellformed_t_forall.
   intros H1 H2 L H3.
   destruct (Leq_dec X Y).
   { rewrite e, subst_id.
@@ -1115,24 +1119,24 @@ Proof.
 Qed.
 
 Lemma congm_E5r :
-  forall P Q Q', wellformed_g {{ P,Q }} -> wellformed_g {{ P,Q' }} ->
+  forall P Q Q', wellformed_t {{ P,Q }} -> wellformed_t {{ P,Q' }} ->
     Q ==m Q' -> {{ P,Q }} ==m {{ P,Q' }}.
 Proof.
   intros P Q Q' H1 H2 H3.
   apply congm_trans with {{Q,P}}; auto.
-  { apply wellformed_g_swap. auto. }
+  { apply wellformed_t_swap. auto. }
   { apply congm_E2. auto. }
   apply congm_trans with {{Q',P}}; auto.
-  { apply wellformed_g_swap. auto. }
-  { apply wellformed_g_swap. auto. }
-  { apply congm_E5; auto; apply wellformed_g_swap; auto. }
+  { apply wellformed_t_swap. auto. }
+  { apply wellformed_t_swap. auto. }
+  { apply congm_E5; auto; apply wellformed_t_swap; auto. }
   apply congm_E2.
-  apply wellformed_g_swap. auto.
+  apply wellformed_t_swap. auto.
 Qed.
 
 Lemma congm_E9ex :
   forall X Y P, 
-    wellformed_g {{ X = Y, P }} -> wellformed_g {{ P[Y/X] }} ->
+    wellformed_t {{ X = Y, P }} -> wellformed_t {{ P[Y/X] }} ->
     In X (freelinks P) ->
     {{ X = Y, P }} ==m {{ P[Y/X] }}.
 Proof.
@@ -1140,23 +1144,23 @@ Proof.
   destruct (Leq_dec X Y).
   { rewrite e, subst_id.
     rewrite e in H1.
-    assert (A: wellformed_g P).
+    assert (A: wellformed_t P).
     { rewrite e, subst_id in H2. auto. }
-    apply congm_trans with {{GZero, P}}; auto.
+    apply congm_trans with {{TZero, P}}; auto.
     { apply congm_E5; auto. apply congm_E7. }
     apply congm_E1; auto. }
   induction P.
   { simpl. simpl in H3. destruct H3. }
   { apply congm_E9; auto. }
-  simpl in H2. apply wellformed_g_inj in H2.
+  simpl in H2. apply wellformed_t_inj in H2.
   destruct H2 as [H21 H22].
-  assert (WF1: wellformed_g {{P1 [Y / X], P2 [Y / X]}}).
+  assert (WF1: wellformed_t {{P1 [Y / X], P2 [Y / X]}}).
   { rewrite <- subst_mol.
-    apply subst_wellformed_g.
-    apply wellformed_g_inj in H1;
+    apply subst_wellformed_t.
+    apply wellformed_t_inj in H1;
     destruct H1; auto.
     rewrite !multiplicity_mol.
-    rewrite wellformed_g_forall in H1.
+    rewrite wellformed_t_forall in H1.
     assert (AX: In X (links {{X=Y,(P1,P2)}})).
     { apply in_links_link_multiset. simpl.
       rewrite Leq_dec_refl. simpl.
@@ -1190,38 +1194,38 @@ Proof.
     apply congm_E5; auto.
     { rewrite <- A. auto. }
     apply IHP1; auto.
-    apply wellformed_g_link_multiset with (Q:={{X=Y,P1,P2}}) in H1.
-    + apply wellformed_g_inj in H1. destruct H1. auto.
+    apply wellformed_t_link_multiset with (Q:={{X=Y,P1,P2}}) in H1.
+    + apply wellformed_t_inj in H1. destruct H1. auto.
     + apply link_multiset_assoc.
   - rewrite subst_mol.
     destruct H.
     assert (A: {{P1[Y/X]}}=P1).
     { symmetry. apply subst_none. auto. }
-    assert (A1: wellformed_g {{X = Y, (P2, P1)}}).
-    { apply wellformed_g_link_multiset with {{X=Y,(P1,P2)}}; auto.
+    assert (A1: wellformed_t {{X = Y, (P2, P1)}}).
+    { apply wellformed_t_link_multiset with {{X=Y,(P1,P2)}}; auto.
       apply link_multiset_inj.
       - apply meq_refl.
       - apply link_multiset_swap. }
     apply congm_trans with {{X=Y,(P2,P1)}}; auto.
     { apply congm_E5r; auto. apply congm_E2.
-      apply wellformed_g_inj in H1. destruct H1. auto. }
+      apply wellformed_t_inj in H1. destruct H1. auto. }
     apply congm_trans with {{(X=Y,P2),P1}}; auto.
     { apply congm_E3; auto. }
     rewrite A. rewrite A in WF1.
     apply congm_trans with {{P2 [Y / X], P1}}; auto.
-    { apply wellformed_g_swap. auto. }
+    { apply wellformed_t_swap. auto. }
     { apply congm_E5; auto.
-      { apply wellformed_g_swap. auto. }
+      { apply wellformed_t_swap. auto. }
       apply IHP2; auto.
-      apply wellformed_g_link_multiset with (Q:={{X=Y,P2,P1}}) in H1.
-      { apply wellformed_g_inj in H1. destruct H1. auto. }
+      apply wellformed_t_link_multiset with (Q:={{X=Y,P2,P1}}) in H1.
+      { apply wellformed_t_inj in H1. destruct H1. auto. }
       apply meq_trans with (link_multiset {{X=Y,(P2,P1)}}).
       { apply link_multiset_inj.
         - apply meq_refl.
         - apply link_multiset_swap. }
       apply link_multiset_assoc. }
     apply congm_E2.
-    apply wellformed_g_swap. auto.
+    apply wellformed_t_swap. auto.
 Qed.
 
 Fixpoint subst_once_list (Y X:Link) (ls:list Link) : option (list Link) :=
@@ -1235,15 +1239,15 @@ Fixpoint subst_once_list (Y X:Link) (ls:list Link) : option (list Link) :=
               end
   end.
 
-Fixpoint subst_once (Y X:Link) (P:Graph) : option Graph :=
+Fixpoint subst_once (Y X:Link) (P:Term) : option Term :=
   match P with
-  | GZero => None
-  | GAtom a => match a with 
-    | AConn x y => if x =? X then Some (GAtom (AConn Y y))
-                   else if y =? X then Some (GAtom (AConn x Y))
+  | TZero => None
+  | TAtom a => match a with 
+    | AConn x y => if x =? X then Some (TAtom (AConn Y y))
+                   else if y =? X then Some (TAtom (AConn x Y))
                    else None
     | AAtom p args => match subst_once_list Y X args with
-                      | Some ls => Some (GAtom (AAtom p ls))
+                      | Some ls => Some (TAtom (AAtom p ls))
                       | None => None
                       end
     end
@@ -1308,12 +1312,12 @@ Proof.
   - simpl. rewrite in_app_iff.
     destruct (subst_once Y X P1) eqn:E1.
     + split; intros H.
-      * left. apply IHP1. exists g. auto.
-      * exists {{g, P2}}. auto.
+      * left. apply IHP1. exists t. auto.
+      * exists {{t, P2}}. auto.
     + destruct (subst_once Y X P2) eqn:E2;
       split; intros H.
-      * right. apply IHP2. exists g. auto.
-      * exists {{P1, g}}. auto.
+      * right. apply IHP2. exists t. auto.
+      * exists {{P1, t}}. auto.
       * destruct H. inversion H.
       * destruct H;
         [ apply IHP1 in H | apply IHP2 in H ];
@@ -1330,7 +1334,7 @@ Proof.
   - split; try congruence.
     intros H. rewrite <- subst_once_Some in H.
     exfalso. apply H.
-    exists g. apply E.
+    exists t. apply E.
   - split; try congruence.
     intros H C.
     rewrite <- subst_once_Some in C.
@@ -1446,21 +1450,21 @@ Proof.
   - intros P' H.
     destruct (subst_once Y X P1) eqn:E1.
     + inversion H. rewrite !multiplicity_mol.
-      replace (multiplicity (link_multiset g) X)
+      replace (multiplicity (link_multiset t) X)
         with (multiplicity (link_multiset P1) X - 1).
       { symmetry. apply PeanoNat.Nat.add_sub_swap.
         rewrite <- in_links_link_multiset.
         rewrite <- subst_once_Some.
-        exists g. apply E1. }
+        exists t. apply E1. }
       symmetry. apply IHP1 with (Y:=Y); auto.
     + destruct (subst_once Y X P2) eqn:E2.
       * inversion H. rewrite !multiplicity_mol.
-        replace (multiplicity (link_multiset g) X)
+        replace (multiplicity (link_multiset t) X)
         with (multiplicity (link_multiset P2) X - 1).
         { apply PeanoNat.Nat.add_sub_assoc.
           rewrite <- in_links_link_multiset.
           rewrite <- subst_once_Some.
-          exists g. apply E2. }
+          exists t. apply E2. }
         symmetry. apply IHP2 with (Y:=Y); auto.
       * inversion H.
 Qed.
@@ -1514,13 +1518,13 @@ Proof.
   - intros P' X Y H1 H2. simpl in H2.
     destruct (subst_once Y X P1) eqn:E1.
     { inversion H2. rewrite !multiplicity_mol.
-      replace (multiplicity (link_multiset g) Y)
+      replace (multiplicity (link_multiset t) Y)
         with (multiplicity (link_multiset P1) Y + 1).
       { apply PeanoNat.Nat.add_shuffle0. }
       symmetry. apply IHP1 with X; auto. }
     destruct (subst_once Y X P2) eqn:E2.
     { inversion H2. rewrite !multiplicity_mol.
-      replace (multiplicity (link_multiset g) Y)
+      replace (multiplicity (link_multiset t) Y)
         with (multiplicity (link_multiset P2) Y + 1).
       { apply PeanoNat.Nat.add_assoc. }
       symmetry. apply IHP2 with X; auto. }
@@ -1623,7 +1627,7 @@ Proof.
     rewrite HX in HY.
     inversion HY. }
   destruct (subst_once Y X P) eqn:E0.
-  - exists g. repeat (split; auto).
+  - exists t. repeat (split; auto).
     + apply in_freelinks.
       rewrite subst_once_multiplicity_X
         with (P:=P) (Y:=Y); auto.
@@ -1709,7 +1713,7 @@ Proof.
           simpl in A.
           inversion H. simpl.
           f_equal. f_equal. f_equal.
-          assert (A1: Some (GAtom (AAtom name l)) = Some (GAtom (AAtom name l))); auto.
+          assert (A1: Some (TAtom (AAtom name l)) = Some (TAtom (AAtom name l))); auto.
           apply A in A1.
           inversion A1. auto.
         * inversion H. }
@@ -1740,7 +1744,7 @@ Qed.
 Lemma locallink_subst:
   forall P X Y,
     X <> Y ->
-    wellformed_g P -> wellformed_g {{P [Y / X]}} ->
+    wellformed_t P -> wellformed_t {{P [Y / X]}} ->
     In X (locallinks P) ->
     ~ In Y (links P) /\ In Y (locallinks {{P [Y / X]}}).
 Proof.
@@ -1749,7 +1753,7 @@ Proof.
   rewrite <- multiplicity_not_in.
   rewrite in_locallinks.
   assert (A1: multiplicity (link_multiset {{P[Y/X]}}) Y <= 2).
-  { apply wellformed_g_forall; auto.
+  { apply wellformed_t_forall; auto.
     rewrite in_links_link_multiset.
     rewrite subst_multiplicity_Y; auto.
     rewrite LX. apply le_n_S.
@@ -1765,17 +1769,17 @@ Proof.
   rewrite LX, A2. auto.
 Qed.
 
-Lemma congm_wellformed_g:
-  forall P Q, P ==m Q -> wellformed_g P /\ wellformed_g Q.
+Lemma congm_wellformed_t:
+  forall P Q, P ==m Q -> wellformed_t P /\ wellformed_t Q.
 Proof.
   intros P Q H.
   induction H; auto; split; auto.
-  - apply wellformed_g_link_multiset with {{P,Q}}; auto.
+  - apply wellformed_t_link_multiset with {{P,Q}}; auto.
     apply link_multiset_swap.
-  - apply wellformed_g_link_multiset with {{P,(Q,R)}}; auto.
+  - apply wellformed_t_link_multiset with {{P,(Q,R)}}; auto.
     apply link_multiset_assoc.
-  - apply connector_wellformed_g.
-  - unfold wellformed_g.
+  - apply connector_wellformed_t.
+  - unfold wellformed_t.
     simpl. auto.
 Qed.
 
@@ -1885,16 +1889,16 @@ Proof.
     simpl in H.
     destruct (subst_once Y X P1) eqn:E1.
     { inversion H. rewrite !multiplicity_mol.
-      rewrite IHP1 with g; auto. }
+      rewrite IHP1 with t; auto. }
     destruct (subst_once Y X P2) eqn:E2.
     { inversion H. rewrite !multiplicity_mol.
-      rewrite IHP2 with g; auto. }
+      rewrite IHP2 with t; auto. }
     inversion H.
 Qed.
 
 Lemma congm_E4 :
   forall P X Y,
-    wellformed_g P -> wellformed_g {{P [Y / X]}} ->
+    wellformed_t P -> wellformed_t {{P [Y / X]}} ->
     In X (locallinks P) -> P ==m {{ P[Y/X] }}.
 Proof.
   intros P X Y WFP WFP' HX.
@@ -1910,8 +1914,8 @@ Proof.
   destruct H as [Q [H1 [H2 H3]]].
   assert (A6: P = {{Q [X / Y]}}).
   { apply subst_once_subst; auto. }
-  assert (A4: wellformed_g {{X=Y,Q}}).
-  { apply wellformed_g_forall.
+  assert (A4: wellformed_t {{X=Y,Q}}).
+  { apply wellformed_t_forall.
     intros L H.
     rewrite multiplicity_mol.
     simpl.
@@ -1924,14 +1928,14 @@ Proof.
       apply in_freelinks in H3. rewrite H3. auto.
     - rewrite <- subst_once_multiplicity_other 
         with P Q X Y L; auto.
-      rewrite wellformed_g_forall in WFP.
+      rewrite wellformed_t_forall in WFP.
       apply WFP. rewrite A6.
       apply in_links_link_multiset.
       rewrite subst_multiplicity_other; auto.
       simpl in H. destruct H as [H|[H|H]]; try congruence.
       apply in_links_link_multiset. auto. }
-  assert (A5: wellformed_g {{Y=X,Q}}).
-  { apply wellformed_g_link_multiset with ({{X=Y,Q}}); auto.
+  assert (A5: wellformed_t {{Y=X,Q}}).
+  { apply wellformed_t_link_multiset with ({{X=Y,Q}}); auto.
     apply meq_trans with (munion (link_multiset {{X=Y}}) (link_multiset Q)).
     { apply link_multiset_mol. }
     apply meq_trans with (munion (link_multiset {{Y=X}}) (link_multiset Q)).
@@ -1984,258 +1988,23 @@ Proof.
     + apply cong_sym; auto.
 Qed.
 
-Fixpoint term_to_atom_list (t: Graph) : list Atom :=
-  match t with
-  | GZero => []
-  | GAtom atom => [atom]
-  | GMol g1 g2 => (term_to_atom_list g1)++(term_to_atom_list g2)
-  end.
+(* For SC-GI Correspondence *)
 
-Fixpoint get_connectors (l: list Atom) :=
-  match l with
-  | [] => ([],[])
-  | h::t =>
-    let (conns, atoms) := (get_connectors t) in
-      match h with 
-      | AConn x y => ((x,y)::conns, atoms)
-      | AAtom _ _ => (conns, h::atoms)
-    end
-  end.
+Inductive Path : Type :=
+  | PHere
+  | PLeft (p : Path)
+  | PRight (p : Path).
 
-(* Def.1 *)
-Definition closed G :=
-  length (freelinks G) = 0.
+Record Port := {
+  node : Path;
+  arg : nat;
+}.
 
-Example closed_ex1: ~ closed {{ "a"("X") }}.
-Proof.
-  unfold closed.
-  simpl. auto.
-Qed.
-
-Example closed_ex2: closed {{ "a"("X"), "b"("X") }}.
-Proof.
-  unfold closed.
-  simpl. auto.
-Qed.
-
-Fixpoint normal_sub G :=
-  match G with
-  | GZero => False
-  | GAtom a =>
-    match a with
-    | AAtom _ _ => True
-    | AConn _ _ => False
-    end
-  | GMol g1 g2 => normal_sub g1 /\ normal_sub g2
-  end.
-
-Definition normal G := G = GZero \/ normal_sub G.
-
-Definition wfnormal G := wellformed_g G /\ normal G.
-
-Definition fuse_connector (c: (Link * Link)) g :=
-  let (X, Y) := c in {{g[Y/X]}}.
-
-Fixpoint make_graph atoms :=
-  match atoms with
-  | [] => GZero
-  | [a] => GAtom a
-  | h::t => let g := make_graph t in {{ h, g }}
-  end.
-
-Definition normalize g :=
-  let (conns, atoms) := get_connectors (term_to_atom_list g) in
-    fold_right fuse_connector (make_graph atoms) conns.
-
-(* Lemma connector_iff: forall c,
-  get_functor c = "="/2 <-> exists X Y, c = {{X=Y}}.
-Proof.
-  intros c. split; intros H; destruct c.
-  - simpl in H. inversion H.
-    destruct links0. { inversion H2. }
-    destruct links0. { inversion H2. }
-    destruct links0. { exists l,l0. auto. }
-    inversion H2.
-  - simpl. destruct H as [X [Y H]].
-    inversion H. auto.
-Qed. *)
-
-Lemma get_connectors_aconn: forall X Y l c a,
-  get_connectors l = (c,a) ->
-  get_connectors ({{X=Y}}::l) = ((X,Y)::c,a).
-Proof.
-  intros.
-  simpl. rewrite H. auto.
-Qed.
-
-Lemma get_connectors_aatom: forall p l t c a,
-  get_connectors t = (c,a) ->
-  get_connectors ((AAtom p l)::t) = (c,(AAtom p l)::a).
-Proof.
-  intros.
-  simpl. rewrite H. auto.
-
-  (* destruct a0.
-  destruct b; auto.
-  destruct b0; auto.
-  destruct b1; auto.
-  destruct b2; auto.
-  destruct b3; auto.
-  destruct b4; auto.
-  destruct b5; auto.
-  destruct b6; auto.
-  destruct p; auto.
-  destruct l as [|h1 t1]; auto.
-  destruct t1 as [|h2 t2]; auto.
-  destruct t2 as [|h3 t3]; auto.
-  exfalso. apply H. auto. *)
-Qed.
-
-Lemma get_connectors_al: forall l1 l2 c1 a1 c2 a2,
-  get_connectors l1 = (c1, a1) ->
-  get_connectors l2 = (c2, a2) ->
-  get_connectors (l1++l2) = (c1++c2,a1++a2).
-Proof.
-  intros l1.
-  induction l1.
-  - simpl. intros. inversion H. simpl. rewrite H0. auto.
-  - intros. rewrite <- app_comm_cons. 
-    destruct a.
-    + destruct (get_connectors l1) as [c11 a11] eqn:e.
-      rewrite get_connectors_aatom with (c:=c11++c2) (a:=a11++a2).
-      { simpl in H. rewrite e in H. inversion H. auto. }
-      apply IHl1; auto.
-    + destruct (get_connectors l1) as [c11 a11] eqn:e.
-      simpl in H. rewrite e in H. inversion H.
-      rewrite get_connectors_aconn with (c:=c11++c2) (a:=a11++a2).
-      { simpl. rewrite H3. auto. }
-      apply IHl1; auto.
-Qed.
-
-Lemma normalization: forall g, wellformed_g g -> closed g ->
-  normal (normalize g).
-Proof.
-  intros g WF C.
-  unfold normalize.
-  unfold normal.
-  induction g; auto; simpl.
-  - destruct atom; simpl; auto.
-  - destruct (get_connectors (term_to_atom_list g1)) as [c1 a1] eqn:e1.
-    destruct (get_connectors (term_to_atom_list g2)) as [c2 a2] eqn:e2.
-    rewrite get_connectors_al with (c1:=c1) (a1:=a1) (c2:=c2) (a2:=a2).
-    + simpl. admit.
-Admitted.
-
-  (* destruct g; auto.
-  - destruct atom as [p args|x y]; simpl; auto.
-  - induction g1; simpl.
-    + destruct (get_connectors (term_to_atom_list g2)) as [c a] eqn:e2.
-      induction g2; simpl in e2.
-      * inversion e2. simpl. auto.
-      * destruct atom.
-      
-
-  induction g; auto.
-  - destruct atom as [p args|x y].
-    + simpl. unfold wfnormal. split; auto.
-      unfold normal. simpl. auto.
-    + simpl. auto.
-  - simpl.
-    destruct (get_connectors (term_to_atom_list g1)) as [c1 a1] eqn:e1.
-    destruct (get_connectors (term_to_atom_list g2)) as [c2 a2] eqn:e2.
-    rewrite get_connectors_al with (c1:=c1) (a1:=a1) (c2:=c2) (a2:=a2).
-    + 
-    + symmetry. apply get_connectors_al; auto.
-Admitted. *)
-
-Lemma normalization_closed: forall g, wellformed_g g -> closed g ->
-  g == (normalize g).
-Proof.
-  intros g WF C.
-  induction g; unfold normalize.
-  - simpl. apply cong_refl. auto.
-  - destruct atom.
-Admitted. 
-
-Reserved Notation "p '==n' q" (at level 40).
-Inductive congn : Graph -> Graph -> Prop :=
-  | congn_E2 : forall P Q, wfnormal {{P, Q}} ->
-                {{P, Q}} ==n {{Q, P}}
-  | congn_E3 : forall P Q R, wfnormal {{P, (Q, R)}} -> 
-                {{P, (Q, R)}} ==n {{(P, Q), R}}
-  | congn_E4 : forall P X Y, wfnormal P -> wfnormal {{ P[Y/X] }} ->
-              In X (locallinks P) -> P ==n {{ P[Y/X] }}
-  | congn_E5 : forall P P' Q, wfnormal {{ P,Q }} -> wfnormal {{ P',Q }} ->
-                P ==n P' -> {{ P,Q }} ==n {{ P',Q }}
-  | congn_refl : forall P, wfnormal P ->
-                  P ==n P
-  | congn_trans : forall P Q R, wfnormal P -> wfnormal Q -> wfnormal R ->
-    P ==n Q -> Q ==n R -> P ==n R
-  | congn_sym : forall P Q, wfnormal P -> wfnormal Q -> 
-    P ==n Q -> Q ==n P
-  where "p '==n' q" := (congn p q).
-
-Lemma normal_inj: forall P Q, normal {{P,Q}} -> normal P /\ normal Q.
-Proof.
-  unfold normal. simpl. intros.
-  split; right; destruct H; try discriminate H;
-  destruct H; auto.
-Qed.
-
-Lemma cong_implies_congn: forall P Q,
-  closed P -> closed Q -> P == Q ->
-  normalize P ==n normalize Q.
-Proof.
-  intros P Q HP HQ H.
-  induction H; unfold normalize; simpl.
-  - apply congn_refl.
-Admitted.
-
-Lemma congn_congm_iff: forall P Q,
-  wfnormal P -> wfnormal Q ->
-    P ==m Q <-> P ==n Q.
-Proof.
-  intros P Q NP NQ.
-  split; intro H.
-  - induction H.
-    + destruct NP. destruct H1; inversion H1.
-      simpl in H2. destruct H2. 
-    + apply congn_E2; auto.
-    + apply congn_E3; auto.
-    + apply congn_E5; auto.
-      apply IHcongm; destruct NP, NQ; auto; unfold wfnormal; split.
-      * apply wellformed_g_inj in H as [HP HQ]; auto.
-      * apply normal_inj in H3 as [H3 _]; auto.
-      * apply wellformed_g_inj in H4 as [HP' _]; auto.
-      * apply normal_inj in H5 as [H5 _]; auto.
-    (* + destruct NP.
-    + destruct NP as [_ [[] _]]; auto.
-    + apply congn_refl; auto.
-    + apply congn_trans with (Q:=R); auto.
-    + apply congn_sym; auto.
-  - induction H.
-    + apply congm_E2. destruct NP. auto.
-    + apply congm_E3. destruct NP. auto.
-    + apply congm_E5; destruct NP,NQ; auto.
-      apply IHcongn; unfold wfnormal; split.
-      * apply wellformed_g_inj in H2 as [H2 _]; auto.
-      * apply normal_inj in H3 as [H3 _]; auto.
-      * apply wellformed_g_inj in H4 as [H4 _]; auto.
-      * apply normal_inj in H5 as [H5 _]; auto.
-    + apply congm_refl; unfold wfnormal in H;
-      destruct H; auto.
-    + apply congm_trans with (Q:=Q); auto.
-      * unfold wfnormal in NP; destruct NP as [NP _]; auto.
-      * unfold wfnormal in H0; destruct H0 as [H0 _]; auto.
-      * unfold wfnormal in NQ; destruct NQ as [NQ _]; auto.
-    + apply congm_sym; auto.
-      * unfold wfnormal in H; destruct H as [H _]; auto.
-      * unfold wfnormal in H0; destruct H0 as [H0 _]; auto. *)
-Abort.
-
-
-
-(* TODO: fuse_connectors *)
+Record PortGraph := {
+  nodes : list (string * Path);
+  frees : list (Link * Port);
+  locals : list (Port * Port)
+}.
 
 Fixpoint add_indices {X} (n : nat) (l : list X) : list (nat * X) := 
   match l with
@@ -2243,25 +2012,143 @@ Fixpoint add_indices {X} (n : nat) (l : list X) : list (nat * X) :=
   | [] => []
   end.
 
-Fixpoint add_to_port_list (name : string) (atomid argpos : nat) (l : list (string * list (nat * nat))) :=
+Fixpoint find_link (p : Link) (l : list (Link * Port)) : option (Link * Port) :=
   match l with
-  | (name', list) :: t => if string_dec name name'
-                          then (name', (atomid, argpos) :: list) :: t
-                          else (name', list) :: 
-                               (add_to_port_list name atomid argpos t)
-  | [] => [(name, [(atomid, argpos)])]
+  | (l', port) :: t => if l' =? p then Some (l', port) else find_link p t
+  | [] => None
   end.
 
-Definition add_atom_to_port_list (atomid : nat) (links : list Link) (pl : list (string * list (nat * nat))) :=
-  fold_right (fun x a => match x with
-              | (argpos,link) => add_to_port_list link atomid argpos a
-              end) pl (add_indices O links).
+Definition add_free_link (lp : Link * Port) (g : PortGraph) : PortGraph :=
+  let (l, p) := lp in
+  match find_link l (frees g) with
+  | Some (l', p') => 
+    {| nodes := nodes g;
+       frees := filter (fun '(l'', _) => negb (l'' =? l)) (frees g);
+       locals := (p, p') :: locals g |}
+  | None => 
+    {| nodes := nodes g;
+       frees := lp :: frees g;
+       locals := locals g |}
+  end.
 
-Definition atom_list_to_port_list (atoms: list Atom) :=
-  fold_right (fun x a => match x with
-              | (atomid, AAtom _ links) => add_atom_to_port_list atomid links a
-              end) [] (add_indices O atoms).
+(* Definition empty_graph : PortGraph :=
+  {| nodes := []; frees := []; locals := [] |}. *)
 
-Definition term_to_port_list (t: Graph) := atom_list_to_port_list (term_to_atom_list t).
+Definition atom_to_graph (name : string) (links : list Link) : PortGraph :=
+  fold_right add_free_link
+    {| nodes := [(name, PHere)]; frees := []; locals := [] |}
+    (map
+      (fun '(n, l) => (l, {| node := PHere; arg := n |}))
+      (add_indices 0 links)).
 
-Definition count_atoms (t: Graph) := length (term_to_atom_list t).
+Definition graph_mol (g1 g2 : PortGraph) : PortGraph :=
+  fold_right add_free_link
+    {| nodes := map (fun '(n, p) => (n, PLeft p)) (nodes g1) ++
+                        map (fun '(n, p) => (n, PRight p)) (nodes g2);
+      frees := map (fun '(l, p) => (l, {| node := PRight (node p); arg := arg p |})) (frees g2);
+      locals := map (fun '(p1, p2) =>
+                      ({| node := PLeft (node p1); arg := arg p1 |},
+                        {| node := PLeft (node p2); arg := arg p2 |})) (locals g1) ++
+                map (fun '(p1, p2) =>
+                      ({| node := PRight (node p1); arg := arg p1 |},
+                        {| node := PRight (node p2); arg := arg p2 |})) (locals g2) |}
+    (map (fun '(l, p) => (l, {| node := PLeft (node p); arg := arg p |})) (frees g1)).
+
+Fixpoint term_to_graph (t : Term) : PortGraph := 
+  match t with
+  | TZero => {| nodes := []; frees := []; locals := [] |}
+  | TAtom a => 
+    match a with
+    | AAtom name links => atom_to_graph name links
+    | AConn X Y => atom_to_graph "=" [X; Y]
+    end
+  | TMol t1 t2 => graph_mol (term_to_graph t1) (term_to_graph t2)
+  end.
+
+Compute term_to_graph {{ "a"("X"), "b"("X"), "c"("Y") }}.
+
+Definition bijection (xs ys : list Path) (f : Path -> Path) : Prop :=
+  NoDup xs /\ NoDup ys /\ Permutation ys (map f xs).
+
+Record isomorphism (g1 g2 : PortGraph) := {
+  iso_map : Path -> Path;
+  iso_map_bij : bijection (map snd (nodes g1)) (map snd (nodes g2)) iso_map;
+  locals_preserve : forall p1 p2,
+    In (p1, p2) (locals g1) \/ In (p2, p1) (locals g1) <->
+    In ({| node := iso_map (node p1); arg := arg p1 |},
+        {| node := iso_map (node p2); arg := arg p2 |}) (locals g2)
+    \/
+    In ({| node := iso_map (node p2); arg := arg p2 |},
+        {| node := iso_map (node p1); arg := arg p1 |}) (locals g2);
+  frees_preserve : forall l p,
+    In (l, p) (frees g1) <->
+    In (l, {| node := iso_map (node p); arg := arg p |}) (frees g2);
+}.
+
+Definition iso (g1 g2 : PortGraph) : Prop := 
+  exists (i : isomorphism g1 g2), True.
+Notation "p '~=' q" := (iso p q) (at level 40).
+
+Tactic Notation "solve_iso" constr(f) :=
+  eexists; auto; refine {| iso_map := f |}; simpl.
+
+Lemma iso_refl :
+  forall g, g ~= g.
+Proof.
+  intros g.
+  solve_iso (fun (p:Path) => p).
+  (* - unfold bijection.
+    set (map snd (nodes g)) as xs.
+    rewrite map_id.
+  - intros. split; intros H; destruct H, p1, p2;
+    simpl in *; auto.
+  - intros. split; intros H; destruct p; simpl; auto. *)
+Admitted.
+
+Lemma iso_sym :
+  forall g1 g2, g1 ~= g2 -> g2 ~= g1.
+Proof.
+  intros. destruct H as [H _].
+  destruct H as [m0 m0_bij m0_lp m0_fp].
+Admitted.
+
+Example iso_example :
+  let g1 := term_to_graph {{ "a"("X"), "b"("X"), "c"("Y") }} in
+  let g2 := term_to_graph {{ "b"("X"), "a"("X"), "c"("Y") }} in
+  g1 ~= g2.
+Proof. Admitted.
+
+Reserved Notation "p '==nc' q" (at level 40).
+Inductive congnc : Term -> Term -> Prop :=
+  | congnc_E1 : forall P, wellformed_t P ->
+                {{TZero, P}} ==nc P
+  | congnc_E2 : forall P Q, wellformed_t {{P, Q}} ->
+                {{P, Q}} ==nc {{Q, P}}
+  | congnc_E3 : forall P Q R, wellformed_t {{P, (Q, R)}} -> 
+                {{P, (Q, R)}} ==nc {{(P, Q), R}}
+  | congnc_E5 : forall P P' Q, wellformed_t {{ P, Q }} -> wellformed_t {{ P',Q }} ->
+                P ==nc P' -> {{ P,Q }} ==nc {{ P',Q }}
+  | congnc_refl : forall P, wellformed_t P ->
+                  P ==nc P
+  | congnc_trans : forall P Q R, wellformed_t P -> wellformed_t Q -> wellformed_t R ->
+    P ==nc Q -> Q ==nc R -> P ==nc R
+  | congnc_sym : forall P Q, wellformed_t P -> wellformed_t Q -> 
+    P ==nc Q -> Q ==nc P
+  where "p '==nc' q" := (congnc p q).
+
+Theorem congnc_iso :
+  forall P Q, P ==nc Q -> exists (i : iso (term_to_graph P) (term_to_graph Q)), True.
+Proof. Admitted.
+
+Theorem iso_congnc :
+  forall P Q (i : iso (term_to_graph P) (term_to_graph Q)), P ==nc Q.
+Proof. Admitted.
+
+Corollary congnc_iso_iff :
+  forall P Q, P ==nc Q <-> exists (i : iso (term_to_graph P) (term_to_graph Q)), True.
+Proof.
+  intros P Q. split.
+  - apply congnc_iso.
+  - intros [i _]. apply iso_congnc. auto.
+Qed.
+
