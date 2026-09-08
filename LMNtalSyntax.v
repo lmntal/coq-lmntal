@@ -501,9 +501,9 @@ Proof.
         apply le_0_n.
       * apply IHl in H.
         rewrite PeanoNat.Nat.add_comm.
-        apply Arith_base.le_plus_trans_stt.
-        (* apply Plus.le_plus_trans. *)
-        apply H.
+        eapply PeanoNat.Nat.le_trans.
+        { exact H. }
+        apply PeanoNat.Nat.le_add_r.
     + destruct (Leq_dec a x).
       * left. auto.
       * right. simpl in H. apply IHl.
@@ -1990,7 +1990,363 @@ Qed.
 
 (* For SC-GI Correspondence *)
 
-Inductive Path : Type :=
+(* Record AtomOcc := {
+  occ_name : string;
+  occ_links : list Link;
+}.
+Inductive AtomOcc :=
+  | OccAtom (name:string) (links:list Link)
+  | OccConn (X Y:Link).
+
+Record PortGraph := {
+  pg_atoms : list AtomOcc;
+}. *)
+
+Definition AtomOcc := Atom.
+Definition OccId := nat.
+Definition PortGraph := list (OccId * AtomOcc).
+
+(* 
+Definition OccId := nat.
+Definition AtomOcc := (OccId * Atom).
+Definition PortGraph := list AtomOcc.
+ *)
+
+Fixpoint flatten_atoms t :=
+  match t with
+  | TZero => []
+  | TAtom a => [a]
+  | TMol t1 t2 =>
+      flatten_atoms t1 ++ flatten_atoms t2
+  end.
+
+Lemma flatten_atoms_E1: forall t,
+  flatten_atoms (TMol TZero t) = flatten_atoms t.
+Proof.
+  intros. auto.
+Qed.
+
+Lemma flatten_atoms_mol: forall t1 t2,
+  flatten_atoms (TMol t1 t2) = flatten_atoms t1 ++ flatten_atoms t2.
+Proof.
+  intros. auto.
+Qed.
+
+Fixpoint enumerate_from (n : nat) (l : list Atom) : PortGraph :=
+  match l with
+  | nil => nil
+  | a :: tl =>
+      (n, a) :: enumerate_from (S n) tl
+  end.
+
+Definition enumerate (l : list Atom) : PortGraph :=
+  enumerate_from 0 l.
+
+Lemma enumerate_from_app :
+  forall n l1 l2,
+    enumerate_from n (l1 ++ l2)
+    =
+    enumerate_from n l1 ++
+    enumerate_from (n + length l1) l2.
+Proof.
+  intros. generalize dependent n. induction l1; simpl.
+  - intros. rewrite PeanoNat.Nat.add_0_r. auto.
+  - intros. f_equal. rewrite IHl1. f_equal. f_equal.
+    auto.
+Qed.
+
+Lemma enumerate_app :
+  forall l1 l2,
+    enumerate (l1 ++ l2)
+    =
+    enumerate l1 ++
+    enumerate_from (length l1) l2.
+Proof.
+  intros. unfold enumerate.
+  apply enumerate_from_app.
+Qed.
+
+Definition graph_of (t : Term) : PortGraph :=
+  enumerate (flatten_atoms t).
+
+Lemma graph_of_E1: 
+  forall t, graph_of (TMol TZero t) = graph_of t.
+Proof.
+  intros. unfold graph_of. auto.
+Qed.
+
+Lemma graph_of_mol:
+  forall t1 t2,
+    graph_of (TMol t1 t2)
+    = graph_of t1 ++ 
+      enumerate_from (length (flatten_atoms t1)) (flatten_atoms t2).
+Proof.
+  intros. unfold graph_of.
+  rewrite flatten_atoms_mol.
+  apply enumerate_app.
+Qed.
+
+Record Port := {
+  port_occ: OccId;
+  port_idx: nat;
+}.
+
+Fixpoint atom_of (G : PortGraph) (i : OccId) : option Atom :=
+  match G with
+  | [] => None
+  | (j, a) :: tl =>
+    if Nat.eqb i j then
+      Some a
+    else
+      atom_of tl i
+  end.
+
+Definition link_of_atom (a : Atom) (k : nat) : option Link :=
+  match a with
+  | AAtom _ links =>
+      nth_error links k
+  | AConn X Y =>
+      nth_error [X;Y] k
+  end.
+
+Definition port_link (G : PortGraph) (p : Port) : option Link :=
+  match atom_of G (port_occ p) with
+  | None => None
+  | Some a =>
+      link_of_atom a (port_idx p)
+  end.
+
+(* self-loop?? *)
+Definition adjacent (G : PortGraph) (p1 p2 : Port) : Prop :=
+  exists l,
+    port_link G p1 = Some l /\ port_link G p2 = Some l.
+
+Lemma atom_of_enumerate_from :
+  forall n l k a,
+    nth_error l k = Some a ->
+    atom_of (enumerate_from n l) (n+k)
+      = Some a.
+Proof.
+  intros. generalize dependent n.
+  generalize dependent k.
+  induction l.
+  - intros. rewrite nth_error_nil in H. discriminate H.
+  - intros. destruct k.
+    + simpl in H. destruct H. simpl.
+      assert (A: forall n, Nat.eqb (n+0) n = true).
+      { induction n0; auto. }
+      rewrite A. auto.
+    + simpl in H. simpl.
+      assert (A: forall n k, Nat.eqb (n + S k) n = false).
+      { intros. induction n0; auto. }
+      rewrite A.
+      apply IHl with (n:=S n) in H.
+      rewrite <- H. f_equal.
+      rewrite PeanoNat.Nat.add_succ_comm. auto.
+Qed.
+
+Definition occs (G : PortGraph) : list OccId :=
+  map fst G.
+
+Lemma occs_enumerate_from :
+  forall n l,
+    occs (enumerate_from n l) = seq n (length l).
+Proof.
+  intros n l. unfold occs.
+  generalize dependent n.
+  induction l; intros; simpl; auto.
+  f_equal. apply IHl.
+Qed.
+
+Fixpoint ports_of_atom_from
+    (i : OccId) (k len : nat)
+    : list Port :=
+  match len with
+  | 0 => []
+  | S len' =>
+      {| port_occ := i;
+         port_idx := k |}
+      :: ports_of_atom_from i (S k) len'
+  end.
+
+Definition ports_of_atom (i : OccId) (a : Atom)
+  : list Port :=
+  match a with
+  | AAtom _ links =>
+      ports_of_atom_from i 0 (length links)
+  | AConn _ _ =>
+      ports_of_atom_from i 0 2
+  end.
+
+Fixpoint ports (G : PortGraph) : list Port :=
+  match G with
+  | [] => []
+  | (i,a)::tl =>
+      ports_of_atom i a ++ ports tl
+  end.
+
+Definition links_of_atom (a : Atom) : list Link :=
+  match a with
+  | AAtom _ ls => ls
+  | AConn X Y => [X;Y]
+  end.
+
+Fixpoint links_pg (G : PortGraph) : list Link :=
+  match G with
+  | [] => []
+  | (_,a)::tl =>
+      links_of_atom a ++ links_pg tl
+  end.
+
+Definition OccMap := OccId -> OccId.
+Definition LinkMap := Link -> Link.
+
+Definition map_port (fo : OccMap) (p : Port) : Port := {|
+  port_occ := fo (port_occ p);
+  port_idx := port_idx p;
+|}.
+
+Definition map_atom (fl : LinkMap) (a : Atom) : Atom :=
+  match a with
+  | AAtom name ls =>
+      AAtom name (map fl ls)
+  | AConn X Y =>
+      AConn (fl X) (fl Y)
+  end.
+
+Definition map_graph (fo : OccMap) (fl : LinkMap)
+    (G : PortGraph) : PortGraph :=
+  map (fun '(i,a) => (fo i, map_atom fl a)) G.
+
+Lemma link_of_atom_map :
+  forall (fl : LinkMap) a k,
+    link_of_atom (map_atom fl a) k =
+    option_map fl (link_of_atom a k).
+Proof.
+  intros. destruct a; simpl; rewrite <- nth_error_map; auto.
+Qed.
+
+Definition Injective {A B} (f : A -> B) : Prop :=
+  forall x y, f x = f y -> x = y.
+
+Definition Surjective {A B} (f : A -> B) : Prop :=
+  forall y, exists x, f x = y.
+
+Definition Bijective {A B} (f : A -> B) : Prop :=
+  Injective f /\ Surjective f.
+
+Lemma map_graph_cons :
+  forall fo fl i a G,
+    map_graph fo fl ((i,a)::G)
+    =
+    (fo i, map_atom fl a)
+      :: map_graph fo fl G.
+Proof. auto. Qed.
+
+Lemma atom_of_map_graph_Some :
+  forall (fo : OccMap) (fl : LinkMap)
+         (G : PortGraph) i a,
+    Injective fo ->
+    atom_of G i = Some a ->
+    atom_of (map_graph fo fl G) (fo i)
+      = Some (map_atom fl a).
+Proof.
+  intros. generalize dependent a.
+  induction G as [| [o a0] G IH]; intros; simpl.
+  - simpl in H0. discriminate H0.
+  - destruct (Nat.eqb i o) eqn:E.
+    + replace o with i 
+        by (apply PeanoNat.Nat.eqb_eq; auto).
+      replace (Nat.eqb (fo i) (fo i)) with true
+        by (rewrite PeanoNat.Nat.eqb_refl; auto).
+      f_equal.
+      simpl in H0. rewrite E in H0.
+      injection H0 as H0. rewrite H0. auto.
+    + assert (Nat.eqb (fo i) (fo o) = false) as Hneq.
+      {
+        apply PeanoNat.Nat.eqb_neq.
+        apply PeanoNat.Nat.eqb_neq in E.
+        auto.
+      }
+      rewrite Hneq.
+      simpl in H0. rewrite E in H0.
+      apply IH. auto.
+Qed.
+
+Lemma atom_of_map_graph_None:
+  forall (fo : OccMap) (fl : LinkMap)
+         (G : PortGraph) i,
+    Injective fo ->
+    atom_of G i = None ->
+    atom_of (map_graph fo fl G) (fo i)
+      = None.
+Proof.
+  intros.
+  induction G; simpl; auto.
+  destruct a.
+  destruct (PeanoNat.Nat.eq_dec i o).
+  - rewrite e.
+    replace (Nat.eqb (fo o) (fo o)) with true
+      by (symmetry; apply PeanoNat.Nat.eqb_refl).
+    simpl in H0.
+    exfalso.
+    replace (Nat.eqb i o) with true in H0.
+    { discriminate H0. }
+    rewrite e. symmetry.
+    apply PeanoNat.Nat.eqb_refl.
+  - assert (Nat.eqb (fo i) (fo o) = false).
+    { apply PeanoNat.Nat.eqb_neq. auto. }
+    assert (Nat.eqb i o = false).
+    { apply PeanoNat.Nat.eqb_neq. auto. }
+    rewrite H1. apply IHG.
+    simpl in H0.
+    rewrite H2 in H0. auto.
+Qed.  
+
+Lemma port_link_map :
+  forall fo fl G p,
+    Injective fo ->
+    port_link (map_graph fo fl G) (map_port fo p)
+      =
+    option_map fl (port_link G p).
+Proof.
+  intros. unfold port_link. simpl.
+  destruct (atom_of G (port_occ p)) eqn:E.
+  - rewrite atom_of_map_graph_Some with (a:=a); auto.
+    apply link_of_atom_map.
+  - simpl.
+    rewrite atom_of_map_graph_None; auto.
+Qed.
+
+(* Definition link_occurs (G : PortGraph) (X : Link) : nat :=
+  multiplicity (list_to_multiset (links_pg G)) X.
+
+Definition free_link (G : PortGraph) (X : Link) : Prop :=
+  link_occurs G X = 1.
+
+Definition local_link (G : PortGraph) (X : Link) : Prop :=
+  link_occurs G X = 2. *)
+
+Definition conn_step (G : PortGraph) (X Y : Link) : Prop :=
+  exists i,
+    atom_of G i = Some (AConn X Y).
+
+Record GraphIso (G H : PortGraph) := {
+  occ_map : OccMap;
+  link_map : LinkMap;
+
+  occ_bij : Bijective occ_map;
+  link_bij : Bijective link_map;
+
+  atom_ok :
+    forall i,
+      option_map (map_atom link_map) (atom_of G i)
+      = atom_of H (occ_map i)
+}.
+
+
+
+(* Inductive Path : Type :=
   | PHere
   | PLeft (p : Path)
   | PRight (p : Path).
@@ -2151,4 +2507,4 @@ Proof.
   - apply congnc_iso.
   - intros [i _]. apply iso_congnc. auto.
 Qed.
-
+ *)
