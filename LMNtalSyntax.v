@@ -6321,3 +6321,57 @@ Proof.
   { apply PeanoNat.Nat.le_antisymm; apply NoDup_incl_length; auto. }
   rewrite !endpoints_length in Hlen. lia.
 Qed.
+
+Lemma matching_endpoints_incl : forall M1 M2,
+  (forall a b, In (a,b) M1 -> In (a,b) M2 \/ In (b,a) M2) ->
+  incl (endpoints M1) (endpoints M2).
+Proof.
+  intros M1 M2 H Z HZ. unfold endpoints in HZ |- *.
+  apply in_flat_map in HZ. destruct HZ as [[a b] [Hab Hz]].
+  destruct (H a b Hab) as [K|K]; apply in_flat_map;
+    [ exists (a,b) | exists (b,a) ]; (split; [ exact K |]); simpl in Hz |- *; tauto.
+Qed.
+
+Lemma edge_eq_not_endpoint : forall c x y,
+  ~ In x (endpoints c) -> (edge_eq c x y <-> x = y).
+Proof.
+  intros c x y HX. split.
+  - intros H. destruct (edge_eq_endpoints c x y H) as [E|[Hin _]];
+      [ exact E | contradiction ].
+  - intros ->. apply edge_eq_refl.
+Qed.
+
+Lemma meq_nodup_same : forall l1 l2,
+  NoDup l1 -> NoDup l2 -> incl l1 l2 -> incl l2 l1 ->
+  meq (list_to_multiset l1) (list_to_multiset l2).
+Proof.
+  intros l1 l2 Hnd1 Hnd2 H12 H21 Z.
+  rewrite !mult_list_count.
+  destruct (in_dec Leq_dec Z l1) as [Hin1|Hnin1].
+  - rewrite (proj1 (NoDup_count_occ' Leq_dec l1) Hnd1 Z Hin1).
+    rewrite (proj1 (NoDup_count_occ' Leq_dec l2) Hnd2 Z (H12 Z Hin1)).
+    reflexivity.
+  - rewrite (proj1 (count_occ_not_In Leq_dec l1 Z) Hnin1).
+    destruct (in_dec Leq_dec Z l2) as [Hin2|Hnin2].
+    + exfalso. apply Hnin1, H21, Hin2.
+    + rewrite (proj1 (count_occ_not_In Leq_dec l2 Z) Hnin2). reflexivity.
+Qed.
+
+Lemma wellformed_t_make_mol_app_r : forall l1 l2,
+  wellformed_t (make_mol (l1 ++ l2)) -> wellformed_t (make_mol l2).
+Proof.
+  intros l1 l2 H.
+  apply wellformed_t_mol_make_mol in H.
+  apply wellformed_t_inj in H. tauto.
+Qed.
+
+Lemma In_flat_map_links_portlink : forall ns i k X,
+  portlink ns i k = Some X -> In X (flat_map links_of_atom ns).
+Proof.
+  intros ns i k X H. unfold portlink in H.
+  destruct (nth_error ns i) as [a|] eqn:Ea; [ | discriminate ].
+  destruct a as [p ls|x y]; [ | discriminate ].
+  apply in_flat_map. exists (AAtom p ls). split.
+  - eapply nth_error_In; eauto.
+  - simpl. eapply nth_error_In; eauto.
+Qed.
