@@ -5664,3 +5664,254 @@ Proof.
   intros P Q WFP WFQ HCP HCQ.
   rewrite congm_cong_iff. apply congm_closed_giso_iff; assumption.
 Qed.
+
+(* ================================================================== *)
+(*  Layer 3 (open case) : connector elimination for non-closed terms  *)
+(* ================================================================== *)
+
+Lemma wf_conn_atom : forall X Y, wellformed_t (TAtom (AConn X Y)).
+Proof.
+  intros X Y. rewrite wellformed_t_forall. intros z _.
+  rewrite multiplicity_TAtom_AConn.
+  destruct (Leq_dec X z); destruct (Leq_dec Y z); simpl; lia.
+Qed.
+
+Lemma congm_conn_sym : forall X Y R,
+  wellformed_t (TMol (TAtom (AConn X Y)) R) ->
+  TMol (TAtom (AConn X Y)) R ==m TMol (TAtom (AConn Y X)) R.
+Proof.
+  intros X Y R W.
+  apply congm_E5.
+  - exact W.
+  - apply wellformed_t_link_multiset with (TMol (TAtom (AConn X Y)) R); [ | exact W ].
+    intros a. rewrite !multiplicity_mol, !multiplicity_TAtom_AConn. lia.
+  - exact (congm_E8 X Y).
+Qed.
+
+Lemma congm_E9ex' : forall X Y P,
+  wellformed_t {{ X = Y, P }} -> wellformed_t {{ P[X/Y] }} ->
+  In Y (freelinks P) ->
+  {{ X = Y, P }} ==m {{ P[X/Y] }}.
+Proof.
+  intros X Y P W1 W2 HY.
+  assert (Wsym : wellformed_t {{ Y = X, P }}).
+  { apply wellformed_t_link_multiset with {{ X = Y, P }}; [ | exact W1 ].
+    intros a. rewrite !multiplicity_mol, !multiplicity_TAtom_AConn. lia. }
+  apply congm_trans' with {{ Y = X, P }}.
+  - apply congm_conn_sym. exact W1.
+  - apply congm_E9ex; [ exact Wsym | exact W2 | exact HY ].
+Qed.
+
+Lemma subst_atoms_aatom : forall Y X l,
+  Forall is_aatom l -> Forall is_aatom (subst_atoms Y X l).
+Proof.
+  intros Y X l H. unfold subst_atoms. apply Forall_map.
+  eapply Forall_impl; [ | exact H ]. intros a Ha. apply map_atom_is_aatom, Ha.
+Qed.
+
+Lemma conns_as_atoms_cons : forall x y cs,
+  conns_as_atoms ((x,y) :: cs) = AConn x y :: conns_as_atoms cs.
+Proof. reflexivity. Qed.
+
+Lemma link_multiset_make_mol_perm : forall l1 l2,
+  Permutation l1 l2 ->
+  meq (link_multiset (make_mol l1)) (link_multiset (make_mol l2)).
+Proof.
+  intros l1 l2 HP a. unfold link_multiset.
+  rewrite !links_make_mol.
+  apply list_to_multiset_perm. apply Permutation_flat_map. exact HP.
+Qed.
+
+Lemma mult_TMol_conn : forall x y R z,
+  multiplicity (link_multiset (TMol (TAtom (AConn x y)) R)) z
+  = (if Leq_dec x z then 1 else 0) + (if Leq_dec y z then 1 else 0)
+    + multiplicity (link_multiset R) z.
+Proof.
+  intros x y R z.
+  rewrite multiplicity_mol, multiplicity_TAtom_AConn. reflexivity.
+Qed.
+
+Lemma peel_conns : forall n cs a,
+  length cs <= n ->
+  Forall is_aatom a ->
+  wellformed_t (make_mol (conns_as_atoms cs ++ a)) ->
+  exists cs' a',
+    make_mol (conns_as_atoms cs ++ a) ==m make_mol (conns_as_atoms cs' ++ a') /\
+    Forall is_aatom a' /\
+    (forall c, In c cs' ->
+       fst c <> snd c /\
+       multiplicity (link_multiset (make_mol (conns_as_atoms cs' ++ a'))) (fst c) = 1 /\
+       multiplicity (link_multiset (make_mol (conns_as_atoms cs' ++ a'))) (snd c) = 1).
+Proof.
+  induction n as [|n IH]; intros cs a Hn Ha WF.
+  - destruct cs as [|c cs]; [ | simpl in Hn; lia ].
+    exists [], a. split; [ apply congm_refl; exact WF |]. split; [ exact Ha |].
+    intros c []; contradiction.
+  - set (T := make_mol (conns_as_atoms cs ++ a)) in *.
+    destruct (classic (exists c, In c cs /\
+                ~ (fst c <> snd c /\
+                   multiplicity (link_multiset T) (fst c) = 1 /\
+                   multiplicity (link_multiset T) (snd c) = 1)))
+      as [Hex | Hno].
+    + destruct Hex as [[x y] [Hin Hpeel]]. simpl in Hpeel.
+      apply in_split in Hin. destruct Hin as [l1 [l2 Hcs]].
+      assert (Hperm : Permutation cs ((x,y) :: (l1 ++ l2))).
+      { rewrite Hcs. apply Permutation_sym, Permutation_middle. }
+      set (cs1 := l1 ++ l2) in *.
+      assert (Hlen1 : length cs1 <= n).
+      { assert (length cs = S (length cs1)).
+        { rewrite Hcs. unfold cs1. rewrite !length_app. simpl. lia. }
+        lia. }
+      set (R := make_mol (conns_as_atoms cs1 ++ a)) in *.
+      assert (HpermA : Permutation (conns_as_atoms cs ++ a)
+                                   (AConn x y :: conns_as_atoms cs1 ++ a)).
+      { change (AConn x y :: conns_as_atoms cs1 ++ a)
+          with ((AConn x y :: conns_as_atoms cs1) ++ a).
+        apply Permutation_app_tail.
+        change (AConn x y :: conns_as_atoms cs1)
+          with (conns_as_atoms ((x,y) :: cs1)).
+        apply Permutation_map. exact Hperm. }
+      assert (HTeq : T ==m TMol (TAtom (AConn x y)) R).
+      { unfold T, R.
+        change (TMol (TAtom (AConn x y)) (make_mol (conns_as_atoms cs1 ++ a)))
+          with (make_mol (AConn x y :: conns_as_atoms cs1 ++ a)).
+        apply make_mol_perm; [ exact HpermA | exact WF ]. }
+      assert (WF1 : wellformed_t (TMol (TAtom (AConn x y)) R))
+        by exact (proj2 (congm_wellformed_t _ _ HTeq)).
+      assert (WFR : wellformed_t R) by (apply wellformed_t_inj in WF1; tauto).
+      assert (Hmeq : forall z, multiplicity (link_multiset T) z
+                     = multiplicity (link_multiset (TMol (TAtom (AConn x y)) R)) z).
+      { intros z. unfold T.
+        change (TMol (TAtom (AConn x y)) R)
+          with (make_mol (AConn x y :: conns_as_atoms cs1 ++ a)).
+        apply (link_multiset_make_mol_perm _ _ HpermA). }
+      assert (Hpeeled : exists cs2 a2,
+                TMol (TAtom (AConn x y)) R ==m make_mol (conns_as_atoms cs2 ++ a2) /\
+                Forall is_aatom a2 /\ length cs2 <= n).
+      { destruct (Leq_dec x y) as [Exy | Exy].
+        - subst y. exists cs1, a.
+          split; [ | split; [ exact Ha | exact Hlen1 ] ].
+          apply congm_trans' with (TMol TZero R).
+          + apply congm_E5;
+              [ exact WF1 | apply wellformed_t_TZero_l, WFR | apply congm_E7 ].
+          + apply congm_E1, WFR.
+        - assert (HmxT : multiplicity (link_multiset T) x
+                         = 1 + multiplicity (link_multiset R) x).
+          { rewrite Hmeq, mult_TMol_conn, Leq_dec_refl.
+            destruct (Leq_dec y x); [ congruence | simpl; lia ]. }
+          assert (HmyT : multiplicity (link_multiset T) y
+                         = 1 + multiplicity (link_multiset R) y).
+          { rewrite Hmeq, mult_TMol_conn, Leq_dec_refl.
+            destruct (Leq_dec x y); [ congruence | simpl; lia ]. }
+          assert (Hlex : multiplicity (link_multiset R) x <= 1).
+          { assert (Hle := wellformed_t_mult_le _ x WF1). rewrite <- Hmeq in Hle. lia. }
+          assert (Hley : multiplicity (link_multiset R) y <= 1).
+          { assert (Hle := wellformed_t_mult_le _ y WF1). rewrite <- Hmeq in Hle. lia. }
+          assert (Hor : multiplicity (link_multiset R) x = 1 \/
+                        multiplicity (link_multiset R) y = 1).
+          { destruct (classic (multiplicity (link_multiset R) x = 1)) as [K|K];
+              [ left; exact K |].
+            right.
+            destruct (classic (multiplicity (link_multiset R) y = 1)) as [K2|K2];
+              [ exact K2 |].
+            exfalso. apply Hpeel. split; [ exact Exy | split; lia ]. }
+          destruct Hor as [Hx1 | Hy1].
+          + assert (WFsub : wellformed_t (substitute y x R)).
+            { apply subst_wellformed_t; [ exact WFR |].
+              assert (Hle := wellformed_t_mult_le _ y WFR). lia. }
+            assert (HA : TMol (TAtom (AConn x y)) R ==m substitute y x R).
+            { apply (congm_E9ex x y R); [ exact WF1 | exact WFsub | apply in_freelinks; exact Hx1 ]. }
+            unfold R in HA.
+            rewrite substitute_make_mol, subst_atoms_app,
+                    subst_atoms_conns_as_atoms in HA.
+            exists (map (subst_conn y x) cs1), (subst_atoms y x a).
+            split; [ exact HA | split ].
+            * apply subst_atoms_aatom, Ha.
+            * rewrite length_map. exact Hlen1.
+          + assert (WFsub : wellformed_t (substitute x y R)).
+            { apply subst_wellformed_t; [ exact WFR |].
+              assert (Hle := wellformed_t_mult_le _ x WFR). lia. }
+            assert (HA : TMol (TAtom (AConn x y)) R ==m substitute x y R).
+            { apply (congm_E9ex' x y R); [ exact WF1 | exact WFsub | apply in_freelinks; exact Hy1 ]. }
+            unfold R in HA.
+            rewrite substitute_make_mol, subst_atoms_app,
+                    subst_atoms_conns_as_atoms in HA.
+            exists (map (subst_conn x y) cs1), (subst_atoms x y a).
+            split; [ exact HA | split ].
+            * apply subst_atoms_aatom, Ha.
+            * rewrite length_map. exact Hlen1. }
+      destruct Hpeeled as [cs2 [a2 [HA2 [Ha2 Hlen2]]]].
+      assert (WF2 : wellformed_t (make_mol (conns_as_atoms cs2 ++ a2)))
+        by exact (proj2 (congm_wellformed_t _ _ HA2)).
+      destruct (IH cs2 a2 Hlen2 Ha2 WF2) as [cs' [a' [Hstep [Ha' Hprop]]]].
+      exists cs', a'. split; [ | split; [ exact Ha' | exact Hprop ] ].
+      apply congm_trans' with (TMol (TAtom (AConn x y)) R); [ exact HTeq |].
+      apply congm_trans' with (make_mol (conns_as_atoms cs2 ++ a2)); [ exact HA2 | exact Hstep ].
+    + exists cs, a.
+      split; [ apply congm_refl; exact WF |]. split; [ exact Ha |].
+      intros c Hc. apply NNPP. intro Hbad. apply Hno. exists c. split; assumption.
+Qed.
+
+Lemma mult_list_count : forall l x,
+  multiplicity (list_to_multiset l) x = count_occ Leq_dec l x.
+Proof.
+  induction l as [|y l IH]; intros x; [ reflexivity |].
+  rewrite mult_cons, IH. simpl. destruct (Leq_dec y x); simpl; lia.
+Qed.
+
+Lemma flat_map_endpoints_conns : forall cs,
+  flat_map (fun c => [fst c; snd c]) cs
+  = flat_map links_of_atom (conns_as_atoms cs).
+Proof.
+  induction cs as [|[x y] cs IH]; simpl; [ reflexivity | rewrite IH; reflexivity ].
+Qed.
+
+Lemma cong_open_nf : forall P, wellformed_t P ->
+  exists cs a,
+    P ==m make_mol (conns_as_atoms cs ++ a) /\
+    Forall is_aatom a /\
+    (forall c, In c cs ->
+       fst c <> snd c /\
+       In (fst c) (freelinks P) /\ In (snd c) (freelinks P)) /\
+    NoDup (flat_map (fun c => [fst c; snd c]) cs).
+Proof.
+  intros P WF.
+  destruct (get_connectors (flatten_atoms P)) as [cs0 a0] eqn:Egc.
+  assert (Hperm : Permutation (flatten_atoms P) (conns_as_atoms cs0 ++ a0))
+    by (apply get_connectors_perm; exact Egc).
+  assert (Hf : P ==m make_mol (flatten_atoms P)) by (apply cong_flatten; exact WF).
+  assert (WFf : wellformed_t (make_mol (flatten_atoms P)))
+    by (apply wellformed_t_flatten_make_mol; exact WF).
+  assert (Hp : make_mol (flatten_atoms P) ==m make_mol (conns_as_atoms cs0 ++ a0))
+    by (apply make_mol_perm; [ exact Hperm | exact WFf ]).
+  assert (Ha0 : Forall is_aatom a0).
+  { assert (H := get_connectors_atoms_aatom (flatten_atoms P)).
+    rewrite Egc in H. exact H. }
+  assert (WF0 : wellformed_t (make_mol (conns_as_atoms cs0 ++ a0)))
+    by exact (proj2 (congm_wellformed_t _ _ Hp)).
+  destruct (peel_conns (length cs0) cs0 a0 (le_n _) Ha0 WF0)
+    as [cs [a [Hstep [Ha Hprop]]]].
+  set (nf := make_mol (conns_as_atoms cs ++ a)) in *.
+  assert (HPeq : P ==m nf).
+  { apply congm_trans' with (make_mol (flatten_atoms P)); [ exact Hf |].
+    apply congm_trans' with (make_mol (conns_as_atoms cs0 ++ a0)); [ exact Hp | exact Hstep ]. }
+  exists cs, a. split; [ exact HPeq | split; [ exact Ha | split ] ].
+  - intros c Hc. destruct (Hprop c Hc) as [Hne [Hm1 Hm2]].
+    split; [ exact Hne | split ].
+    + apply in_freelinks. apply (proj2 (congm_mult1_iff P nf HPeq (fst c))). exact Hm1.
+    + apply in_freelinks. apply (proj2 (congm_mult1_iff P nf HPeq (snd c))). exact Hm2.
+  - apply (proj2 (NoDup_count_occ Leq_dec _)).
+    intros Z.
+    destruct (in_dec Leq_dec Z (flat_map (fun c => [fst c; snd c]) cs)) as [Hin|Hnin].
+    2:{ rewrite (count_occ_not_In Leq_dec) in Hnin. lia. }
+    assert (HZmult : multiplicity (link_multiset nf) Z = 1).
+    { apply in_flat_map in Hin. destruct Hin as [c [Hc HZc]].
+      destruct (Hprop c Hc) as [_ [Hm1 Hm2]].
+      destruct HZc as [<-|[<-|[]]]; assumption. }
+    assert (Hle : count_occ Leq_dec (flat_map (fun c => [fst c; snd c]) cs) Z
+                  <= multiplicity (link_multiset nf) Z).
+    { unfold nf. unfold link_multiset. rewrite links_make_mol, flat_map_app.
+      rewrite mult_list_count, count_occ_app.
+      rewrite flat_map_endpoints_conns. lia. }
+    lia.
+Qed.
