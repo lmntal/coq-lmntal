@@ -5915,3 +5915,173 @@ Proof.
       rewrite flat_map_endpoints_conns. lia. }
     lia.
 Qed.
+
+(* ---- the nf shape: term_conns / node_atoms of  make_mol (conns_as_atoms cs ++ a) ---- *)
+
+Lemma term_conns_conns_as_atoms : forall cs,
+  flat_map (fun a => match a with AConn x y => [(x, y)] | AAtom _ _ => [] end)
+           (conns_as_atoms cs) = cs.
+Proof.
+  induction cs as [|[x y] cs IH]; simpl; [ reflexivity | rewrite IH; reflexivity ].
+Qed.
+
+Lemma flat_map_conns_aatom : forall a,
+  Forall is_aatom a ->
+  flat_map (fun a => match a with AConn x y => [(x, y)] | AAtom _ _ => [] end) a = [].
+Proof.
+  induction a as [|h a IH]; intros H; [ reflexivity |].
+  inversion H as [|? ? Hh Ha]; subst.
+  destruct h as [p ls|x y]; [ simpl; apply IH; exact Ha | destruct Hh ].
+Qed.
+
+Lemma filter_conns_as_atoms : forall cs,
+  filter (fun a => match a with AAtom _ _ => true | AConn _ _ => false end)
+         (conns_as_atoms cs) = [].
+Proof.
+  induction cs as [|[x y] cs IH]; simpl; [ reflexivity | exact IH ].
+Qed.
+
+Lemma filter_aatom_id : forall a,
+  Forall is_aatom a ->
+  filter (fun a => match a with AAtom _ _ => true | AConn _ _ => false end) a = a.
+Proof.
+  induction a as [|h a IH]; intros H; [ reflexivity |].
+  inversion H as [|? ? Hh Ha]; subst.
+  destruct h as [p ls|x y]; [ simpl; rewrite IH; [ reflexivity | exact Ha ] | destruct Hh ].
+Qed.
+
+Lemma term_conns_nf : forall cs a,
+  Forall is_aatom a ->
+  term_conns (make_mol (conns_as_atoms cs ++ a)) = cs.
+Proof.
+  intros cs a Ha. unfold term_conns.
+  rewrite flatten_make_mol, flat_map_app.
+  rewrite term_conns_conns_as_atoms, flat_map_conns_aatom by exact Ha.
+  apply app_nil_r.
+Qed.
+
+Lemma node_atoms_nf : forall cs a,
+  Forall is_aatom a ->
+  node_atoms (make_mol (conns_as_atoms cs ++ a)) = a.
+Proof.
+  intros cs a Ha. unfold node_atoms.
+  rewrite flatten_make_mol, filter_app.
+  rewrite filter_conns_as_atoms, filter_aatom_id by exact Ha.
+  reflexivity.
+Qed.
+
+(* ---- matchings (NoDup endpoints) ---- *)
+
+Definition endpoints (c : list (Link * Link)) : list Link :=
+  flat_map (fun p => [fst p; snd p]) c.
+
+Lemma nodup_app_disjoint : forall {A} (l l' : list A) x,
+  NoDup (l ++ l') -> In x l -> In x l' -> False.
+Proof.
+  induction l as [|a l IH]; intros l' x H Hl Hl'; [ contradiction |].
+  simpl in H. inversion H as [|? ? Hnin Hnd]; subst.
+  destruct Hl as [->|Hl].
+  - apply Hnin, in_or_app. right. exact Hl'.
+  - eapply IH; eauto.
+Qed.
+
+Lemma matching_endpoint_unique : forall c p1 p2 z,
+  NoDup (endpoints c) ->
+  In p1 c -> In p2 c ->
+  In z [fst p1; snd p1] -> In z [fst p2; snd p2] ->
+  p1 = p2.
+Proof.
+  intros c p1 p2 z Hnd H1 H2 Hz1 Hz2.
+  destruct (classic (p1 = p2)) as [E|Hne]; [ exact E |]. exfalso.
+  apply in_split in H1. destruct H1 as [L1 [L2 Hc]].
+  subst c. unfold endpoints in Hnd. rewrite flat_map_app in Hnd. simpl in Hnd.
+  set (E1 := flat_map (fun p : Link*Link => [fst p; snd p]) L1) in *.
+  set (E2 := flat_map (fun p : Link*Link => [fst p; snd p]) L2) in *.
+  assert (Hp2 : In p2 (L1 ++ L2)).
+  { apply in_app_or in H2. destruct H2 as [H2|[H2|H2]];
+      [ apply in_or_app; auto | congruence | apply in_or_app; auto ]. }
+  assert (HzLR : In z (E1 ++ E2)).
+  { apply in_app_or in Hp2. apply in_or_app.
+    destruct Hp2 as [Hp2|Hp2]; [ left | right ];
+      apply in_flat_map; exists p2; auto. }
+  apply in_app_or in HzLR. destruct HzLR as [HzL|HzR].
+  - eapply nodup_app_disjoint with (l := E1) (l' := [fst p1; snd p1] ++ E2);
+      [ exact Hnd | exact HzL | apply in_or_app; left; exact Hz1 ].
+  - eapply nodup_app_disjoint with (l := E1 ++ [fst p1; snd p1]) (l' := E2);
+      [ rewrite <- app_assoc; exact Hnd
+      | apply in_or_app; right; exact Hz1
+      | exact HzR ].
+Qed.
+
+Lemma In_endpoints_l : forall c x y, In (x,y) c -> In x (endpoints c).
+Proof.
+  intros c x y H. unfold endpoints. apply in_flat_map. exists (x,y); split; auto. left; auto.
+Qed.
+
+Lemma In_endpoints_r : forall c x y, In (x,y) c -> In y (endpoints c).
+Proof.
+  intros c x y H. unfold endpoints. apply in_flat_map. exists (x,y); split; auto. right; left; auto.
+Qed.
+
+(* in a NoDup-endpoint matching, a shared endpoint forces equal pairs *)
+Lemma matching_no_share : forall c x z y,
+  NoDup (endpoints c) -> In (x,z) c -> In (z,y) c -> x = y.
+Proof.
+  intros c x z y Hnd Hxz Hzy.
+  assert (E : (x,z) = (z,y)).
+  { apply (matching_endpoint_unique c (x,z) (z,y) z Hnd Hxz Hzy);
+      [ right; left; reflexivity | left; reflexivity ]. }
+  inversion E; subst; reflexivity.
+Qed.
+
+Lemma matching_no_share_ll : forall c x z y,
+  NoDup (endpoints c) -> In (z,x) c -> In (z,y) c -> x = y.
+Proof.
+  intros c x z y Hnd H1 H2.
+  assert (E : (z,x) = (z,y)).
+  { apply (matching_endpoint_unique c (z,x) (z,y) z Hnd H1 H2);
+      left; reflexivity. }
+  inversion E; subst; reflexivity.
+Qed.
+
+Lemma matching_no_share_rr : forall c x z y,
+  NoDup (endpoints c) -> In (x,z) c -> In (y,z) c -> x = y.
+Proof.
+  intros c x z y Hnd H1 H2.
+  assert (E : (x,z) = (y,z)).
+  { apply (matching_endpoint_unique c (x,z) (y,z) z Hnd H1 H2);
+      right; left; reflexivity. }
+  inversion E; subst; reflexivity.
+Qed.
+
+Lemma edge_eq_matching_fwd : forall c x y,
+  NoDup (endpoints c) ->
+  edge_eq c x y -> x = y \/ In (x,y) c \/ In (y,x) c.
+Proof.
+  intros c x y Hnd H. unfold edge_eq in H.
+  induction H as [x y HR | x | x y H IH | x m w H1 IH1 H2 IH2].
+  - right; left; exact HR.
+  - left; reflexivity.
+  - destruct IH as [->|[K|K]];
+      [ left; reflexivity | right; right; exact K | right; left; exact K ].
+  - destruct IH1 as [Em|[A|A]].
+    + subst m. exact IH2.
+    + destruct IH2 as [Em|[B|B]].
+      * subst m. right; left; exact A.
+      * left. exact (matching_no_share c x m w Hnd A B).
+      * left. exact (matching_no_share_rr c x m w Hnd A B).
+    + destruct IH2 as [Em|[B|B]].
+      * subst m. right; right; exact A.
+      * left. exact (matching_no_share_ll c x m w Hnd A B).
+      * left. exact (eq_sym (matching_no_share c w m x Hnd B A)).
+Qed.
+
+Lemma edge_eq_matching : forall c x y,
+  NoDup (endpoints c) -> x <> y ->
+  (edge_eq c x y <-> In (x,y) c \/ In (y,x) c).
+Proof.
+  intros c x y Hnd Hxy. split.
+  - intro H. destruct (edge_eq_matching_fwd c x y Hnd H) as [E|D];
+      [ contradiction | exact D ].
+  - intros [K|K]; [ apply edge_eq_step | apply edge_eq_step' ]; exact K.
+Qed.
