@@ -6375,3 +6375,220 @@ Proof.
   - eapply nth_error_In; eauto.
   - simpl. eapply nth_error_In; eauto.
 Qed.
+
+Lemma giso_nf_congm : forall M1 A1 M2 A2,
+  Forall is_aatom A1 -> Forall is_aatom A2 ->
+  wellformed_t (make_mol (conns_as_atoms M1 ++ A1)) ->
+  wellformed_t (make_mol (conns_as_atoms M2 ++ A2)) ->
+  (forall c, In c M1 -> fst c <> snd c /\
+     In (fst c) (freelinks (make_mol (conns_as_atoms M1 ++ A1))) /\
+     In (snd c) (freelinks (make_mol (conns_as_atoms M1 ++ A1)))) ->
+  NoDup (endpoints M1) ->
+  (forall c, In c M2 -> fst c <> snd c /\
+     In (fst c) (freelinks (make_mol (conns_as_atoms M2 ++ A2))) /\
+     In (snd c) (freelinks (make_mol (conns_as_atoms M2 ++ A2)))) ->
+  NoDup (endpoints M2) ->
+  (forall Z, In Z (freelinks (make_mol (conns_as_atoms M1 ++ A1)))
+        <-> In Z (freelinks (make_mol (conns_as_atoms M2 ++ A2)))) ->
+  giso (freelinks (make_mol (conns_as_atoms M1 ++ A1)))
+       (make_mol (conns_as_atoms M1 ++ A1))
+       (make_mol (conns_as_atoms M2 ++ A2)) ->
+  make_mol (conns_as_atoms M1 ++ A1) ==m make_mol (conns_as_atoms M2 ++ A2).
+Proof.
+  intros M1 A1 M2 A2 HA1 HA2 WF1 WF2 Hm1 Hnd1 Hm2 Hnd2 Hfree Hiso.
+  set (nf1 := make_mol (conns_as_atoms M1 ++ A1)) in *.
+  set (nf2 := make_mol (conns_as_atoms M2 ++ A2)) in *.
+  destruct Hiso as (f & g & Hgf & Hfg & Hdom & Hcod & Hfun & Hconn & Hifc & Hff).
+  assert (TC1 : term_conns nf1 = M1) by (apply term_conns_nf; exact HA1).
+  assert (TC2 : term_conns nf2 = M2) by (apply term_conns_nf; exact HA2).
+  assert (NA1 : node_atoms nf1 = A1) by (apply node_atoms_nf; exact HA1).
+  assert (NA2 : node_atoms nf2 = A2) by (apply node_atoms_nf; exact HA2).
+  assert (NB1 : node_atoms (make_mol A1) = A1) by (apply (node_atoms_nf [] A1 HA1)).
+  assert (NB2 : node_atoms (make_mol A2) = A2) by (apply (node_atoms_nf [] A2 HA2)).
+  assert (TB1 : term_conns (make_mol A1) = []) by (apply (term_conns_nf [] A1 HA1)).
+  assert (TB2 : term_conns (make_mol A2) = []) by (apply (term_conns_nf [] A2 HA2)).
+  assert (WFA1 : wellformed_t (make_mol A1))
+    by (apply wellformed_t_make_mol_app_r with (conns_as_atoms M1); exact WF1).
+  assert (WFA2 : wellformed_t (make_mol A2))
+    by (apply wellformed_t_make_mol_app_r with (conns_as_atoms M2); exact WF2).
+  assert (CFA1 : connector_free (make_mol A1)) by (apply connector_free_make_mol; exact HA1).
+  assert (CFA2 : connector_free (make_mol A2)) by (apply connector_free_make_mol; exact HA2).
+  assert (Hdisj1 : forall Z, In Z (endpoints M1) -> ~ In Z (flat_map links_of_atom A1)).
+  { apply matching_endpoints_disjoint_A; [ | exact Hnd1 ].
+    intros c Hc. destruct (Hm1 c Hc) as [_ [P Q]]. split; assumption. }
+  assert (Hdisj2 : forall Z, In Z (endpoints M2) -> ~ In Z (flat_map links_of_atom A2)).
+  { apply matching_endpoints_disjoint_A; [ | exact Hnd2 ].
+    intros c Hc. destruct (Hm2 c Hc) as [_ [P Q]]. split; assumption. }
+  assert (HP12 : forall a b, In (a,b) M1 -> In (a,b) M2 \/ In (b,a) M2)
+    by exact (giso_matching_pairs M1 A1 M2 A2 (freelinks nf1) Hm1 Hnd2 HA1 HA2 Hff).
+  assert (Hff' : forall Z W, In Z (freelinks nf2) -> In W (freelinks nf2) ->
+     (edge_eq (term_conns nf2) Z W <-> edge_eq (term_conns nf1) Z W)).
+  { intros Z W HZ HW. apply (proj2 (Hfree Z)) in HZ. apply (proj2 (Hfree W)) in HW.
+    apply iff_sym, Hff; assumption. }
+  assert (HP21 : forall a b, In (a,b) M2 -> In (a,b) M1 \/ In (b,a) M1)
+    by exact (giso_matching_pairs M2 A2 M1 A1 (freelinks nf2) Hm2 Hnd1 HA2 HA1 Hff').
+  assert (HLen : length M1 = length M2)
+    by (apply matching_same_len; assumption).
+  assert (Hep12 : incl (endpoints M1) (endpoints M2))
+    by (apply matching_endpoints_incl; exact HP12).
+  assert (Hep21 : incl (endpoints M2) (endpoints M1))
+    by (apply matching_endpoints_incl; exact HP21).
+  (* --- Part (ii): giso between the connector-free cores --- *)
+  assert (Hfree_A : forall Z, In Z (freelinks (make_mol A1)) ->
+                    In Z (freelinks nf1) /\ ~ In Z (endpoints M1)).
+  { intros Z HZ. apply in_freelinks in HZ.
+    assert (HZlk : In Z (flat_map links_of_atom A1)).
+    { assert (In Z (links (make_mol A1)))
+        by (apply in_links_link_multiset; lia).
+      rewrite links_make_mol in H. exact H. }
+    assert (HnZ : ~ In Z (endpoints M1)).
+    { intro C. apply (Hdisj1 Z C HZlk). }
+    split; [ | exact HnZ ].
+    apply in_freelinks. unfold nf1.
+    rewrite (mult_nf_notendpoint M1 A1 Z HnZ). exact HZ. }
+  assert (HgisoA : giso (freelinks (make_mol A1)) (make_mol A1) (make_mol A2)).
+  { exists f, g.
+    split; [ exact Hgf | ]. split; [ exact Hfg | ].
+    split.
+    { intros i Hi. rewrite NB2. rewrite NB1 in Hi.
+      specialize (Hdom i). rewrite NA1, NA2 in Hdom. auto. }
+    split.
+    { intros j Hj. rewrite NB1. rewrite NB2 in Hj.
+      specialize (Hcod j). rewrite NA1, NA2 in Hcod. auto. }
+    split.
+    { intros i. rewrite NB1, NB2. specialize (Hfun i). rewrite NA1, NA2 in Hfun. exact Hfun. }
+    split.
+    { intros i k j l Xik Xjl Yik Yjl P1 P2 P3 P4.
+      rewrite TB1, TB2. rewrite !edge_eq_nil.
+      rewrite NB1 in P1, P2. rewrite NB2 in P3, P4.
+      assert (Q := Hconn i k j l Xik Xjl Yik Yjl).
+      rewrite NA1 in Q. rewrite NA2 in Q.
+      specialize (Q P1 P2 P3 P4). rewrite TC1, TC2 in Q.
+      assert (HnX1 : ~ In Xik (endpoints M1))
+        by (intro C; apply (Hdisj1 _ C); apply (In_flat_map_links_portlink A1 i k); exact P1).
+      assert (HnX2 : ~ In Xjl (endpoints M1))
+        by (intro C; apply (Hdisj1 _ C); apply (In_flat_map_links_portlink A1 j l); exact P2).
+      assert (HnY1 : ~ In Yik (endpoints M2))
+        by (intro C; apply (Hdisj2 _ C); apply (In_flat_map_links_portlink A2 (f i) k); exact P3).
+      assert (HnY2 : ~ In Yjl (endpoints M2))
+        by (intro C; apply (Hdisj2 _ C); apply (In_flat_map_links_portlink A2 (f j) l); exact P4).
+      rewrite (edge_eq_not_endpoint M1 Xik Xjl HnX1) in Q.
+      rewrite (edge_eq_not_endpoint M2 Yik Yjl HnY1) in Q.
+      exact Q. }
+    split.
+    { intros i k Z Xik Yik HZ P1 P3.
+      rewrite TB1, TB2. rewrite !edge_eq_nil.
+      destruct (Hfree_A Z HZ) as [HZf HnZ1].
+      rewrite NB1 in P1. rewrite NB2 in P3.
+      assert (Q := Hifc i k Z Xik Yik HZf).
+      rewrite NA1 in Q. rewrite NA2 in Q.
+      specialize (Q P1 P3). rewrite TC1, TC2 in Q.
+      assert (HnX1 : ~ In Xik (endpoints M1))
+        by (intro C; apply (Hdisj1 _ C); apply (In_flat_map_links_portlink A1 i k); exact P1).
+      assert (HnY1 : ~ In Yik (endpoints M2))
+        by (intro C; apply (Hdisj2 _ C); apply (In_flat_map_links_portlink A2 (f i) k); exact P3).
+      assert (HnZ2 : ~ In Z (endpoints M2)) by (intro C; apply HnZ1, Hep21, C).
+      rewrite (edge_eq_not_endpoint M1 Xik Z HnX1) in Q.
+      rewrite (edge_eq_not_endpoint M2 Yik Z HnY1) in Q.
+      exact Q. }
+    { intros Z W HZ HW. rewrite TB1, TB2. reflexivity. } }
+  assert (HA12 : make_mol A1 ==m make_mol A2)
+    by (apply giso_cf_congm; assumption).
+  (* --- Part (i)+(iii): assembly --- *)
+  assert (Wconn12 : meq (link_multiset (make_mol (conns_as_atoms M1)))
+                        (link_multiset (make_mol (conns_as_atoms M2)))).
+  { unfold link_multiset. rewrite !links_make_mol, !flat_map_links_conns.
+    apply meq_nodup_same; assumption. }
+  assert (WmolM1A2 : wellformed_t (TMol (make_mol (conns_as_atoms M1)) (make_mol A2))).
+  { apply wellformed_t_link_multiset with
+      (TMol (make_mol (conns_as_atoms M2)) (make_mol A2)).
+    - intro z. rewrite !multiplicity_mol. rewrite (Wconn12 z). reflexivity.
+    - apply wellformed_t_mol_make_mol. exact WF2. }
+  assert (WnfM1A2 : wellformed_t (make_mol (conns_as_atoms M1 ++ A2))).
+  { apply wellformed_t_link_multiset with
+      (TMol (make_mol (conns_as_atoms M1)) (make_mol A2)).
+    - apply link_multiset_mol_make_mol.
+    - exact WmolM1A2. }
+  apply congm_trans' with (make_mol (conns_as_atoms M1 ++ A2)).
+  - (* nf1 ==m make_mol (conns_as_atoms M1 ++ A2) via congr on the A part *)
+    apply congm_trans' with (TMol (make_mol (conns_as_atoms M1)) (make_mol A1)).
+    { apply make_mol_app. exact WF1. }
+    apply congm_trans' with (TMol (make_mol (conns_as_atoms M1)) (make_mol A2)).
+    { assert (WmolM1A1 : wellformed_t (TMol (make_mol (conns_as_atoms M1)) (make_mol A1)))
+        by (apply wellformed_t_mol_make_mol; exact WF1).
+      apply congm_cong_r; [ exact WmolM1A1 | exact WmolM1A2 | exact HA12 ]. }
+    apply congm_sym'. apply make_mol_app. exact WnfM1A2.
+  - (* matching reorder *)
+    apply matching_reorder; try assumption.
+Qed.
+
+(* The open reverse direction: an interface-preserving graph isomorphism
+   between two wellformed terms with the same free links implies structural
+   congruence. *)
+Theorem giso_congm : forall P Q,
+  wellformed_t P -> wellformed_t Q ->
+  (forall X, In X (freelinks P) <-> In X (freelinks Q)) ->
+  giso (freelinks P) P Q -> P ==m Q.
+Proof.
+  intros P Q WFP WFQ Hfree Hiso.
+  destruct (cong_open_nf P WFP) as (M1 & A1 & HPeq & HA1 & Hm1 & Hnd1).
+  destruct (cong_open_nf Q WFQ) as (M2 & A2 & HQeq & HA2 & Hm2 & Hnd2).
+  set (nf1 := make_mol (conns_as_atoms M1 ++ A1)) in *.
+  set (nf2 := make_mol (conns_as_atoms M2 ++ A2)) in *.
+  assert (WF1 : wellformed_t nf1) by exact (proj2 (congm_wellformed_t _ _ HPeq)).
+  assert (WF2 : wellformed_t nf2) by exact (proj2 (congm_wellformed_t _ _ HQeq)).
+  assert (HfnP : forall X, In X (freelinks nf1) <-> In X (freelinks P))
+    by (intros X; symmetry; apply congm_freelinks; exact HPeq).
+  assert (HfnQ : forall X, In X (freelinks nf2) <-> In X (freelinks Q))
+    by (intros X; symmetry; apply congm_freelinks; exact HQeq).
+  assert (Hfnf : forall X, In X (freelinks nf1) <-> In X (freelinks nf2)).
+  { intros X. rewrite HfnP, HfnQ. apply Hfree. }
+  assert (Hisonf : giso (freelinks nf1) nf1 nf2).
+  { apply giso_trans with P.
+    - apply giso_sym.
+      assert (H := congm_giso _ _ HPeq).
+      apply (giso_iface_ext (freelinks P) (freelinks nf1)); [ | exact H ].
+      intros X. symmetry. apply HfnP.
+    - apply giso_trans with Q.
+      + apply (giso_iface_ext (freelinks P) (freelinks nf1)); [ | exact Hiso ].
+        intros X. symmetry. apply HfnP.
+      + assert (H := congm_giso _ _ HQeq).
+        apply (giso_iface_ext (freelinks Q) (freelinks nf1)); [ | exact H ].
+        intros X. split; intro K.
+        * apply (proj2 (HfnQ X)) in K. apply (proj2 (Hfnf X)) in K. exact K.
+        * apply (proj1 (Hfnf X)) in K. apply (proj1 (HfnQ X)) in K. exact K. }
+  assert (Hm1' : forall c, In c M1 -> fst c <> snd c /\
+     In (fst c) (freelinks nf1) /\ In (snd c) (freelinks nf1)).
+  { intros c Hc. destruct (Hm1 c Hc) as [Hne [Ha Hb]].
+    split; [ exact Hne | split; apply HfnP; assumption ]. }
+  assert (Hm2' : forall c, In c M2 -> fst c <> snd c /\
+     In (fst c) (freelinks nf2) /\ In (snd c) (freelinks nf2)).
+  { intros c Hc. destruct (Hm2 c Hc) as [Hne [Ha Hb]].
+    split; [ exact Hne | split; apply HfnQ; assumption ]. }
+  assert (Hmid : nf1 ==m nf2).
+  { exact (giso_nf_congm M1 A1 M2 A2 HA1 HA2 WF1 WF2 Hm1' Hnd1 Hm2' Hnd2 Hfnf Hisonf). }
+  apply congm_trans' with nf1; [ exact HPeq |].
+  apply congm_trans' with nf2; [ exact Hmid |].
+  apply congm_sym'. exact HQeq.
+Qed.
+
+(* Full correspondence for terms sharing an interface (design note's
+   Theorem 3, without the closedness restriction). *)
+Theorem congm_giso_iff : forall P Q,
+  wellformed_t P -> wellformed_t Q ->
+  (forall X, In X (freelinks P) <-> In X (freelinks Q)) ->
+  (P ==m Q <-> giso (freelinks P) P Q).
+Proof.
+  intros P Q WFP WFQ Hfree. split.
+  - apply congm_giso.
+  - apply giso_congm; assumption.
+Qed.
+
+Corollary cong_giso_iff : forall P Q,
+  wellformed_t P -> wellformed_t Q ->
+  (forall X, In X (freelinks P) <-> In X (freelinks Q)) ->
+  (P == Q <-> giso (freelinks P) P Q).
+Proof.
+  intros P Q WFP WFQ Hfree.
+  rewrite congm_cong_iff. apply congm_giso_iff; assumption.
+Qed.
