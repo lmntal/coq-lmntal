@@ -4836,3 +4836,777 @@ Corollary cong_giso : forall P Q, P == Q -> giso (freelinks P) P Q.
 Proof.
   intros P Q H. apply congm_giso, congm_cong_iff, H.
 Qed.
+
+(* ================================================================== *)
+(*  Reverse direction (connector-free) :  giso  ->  ==m               *)
+(* ================================================================== *)
+
+(* a supply of fresh link names: strings "aa...a" of a chosen length *)
+Definition achar : Ascii.ascii :=
+  match "a"%string with String c _ => c | EmptyString => Ascii.zero end.
+Fixpoint astr (n : nat) : string :=
+  match n with 0 => EmptyString | S k => String achar (astr k) end.
+
+Lemma astr_length : forall n, String.length (astr n) = n.
+Proof. induction n; simpl; auto. Qed.
+
+Lemma astr_inj : forall m n, astr m = astr n -> m = n.
+Proof.
+  intros m n H. apply (f_equal String.length) in H. rewrite !astr_length in H. exact H.
+Qed.
+
+Definition maxlen (l : list Link) : nat := fold_right (fun s => Nat.max (String.length s)) 0 l.
+
+Lemma maxlen_ge : forall l s, In s l -> String.length s <= maxlen l.
+Proof.
+  induction l as [|a l IH]; intros s Hin; simpl in *.
+  - contradiction.
+  - destruct Hin as [->|Hin]; [ lia | ].
+    specialize (IH s Hin). lia.
+Qed.
+
+Lemma fresh_links : forall (l : list Link) m,
+  exists Zs, length Zs = m /\ NoDup Zs /\
+    (forall Z, In Z Zs -> ~ In Z l) /\
+    (forall Z, In Z Zs -> String.length Z > maxlen l).
+Proof.
+  intros l m.
+  exists (map (fun k => astr (S (maxlen l) + k)) (seq 0 m)).
+  split; [ rewrite List.length_map, List.length_seq; reflexivity |].
+  split.
+  { apply NoDup_map_NoDup_ForallPairs; [ | apply seq_NoDup ].
+    intros a b _ _ Hab. apply astr_inj in Hab. lia. }
+  assert (Hlen : forall Z, In Z (map (fun k => astr (S (maxlen l) + k)) (seq 0 m)) ->
+                 String.length Z > maxlen l).
+  { intros Z Hin. apply in_map_iff in Hin. destruct Hin as [k [<- _]].
+    rewrite astr_length in Hab || rewrite astr_length. lia. }
+  split; [ | exact Hlen ].
+  intros Z Hin Habs. apply Hlen in Hin.
+  apply maxlen_ge in Habs. lia.
+Qed.
+
+Fixpoint rename_term (f : Link -> Link) (t : Term) : Term :=
+  match t with
+  | TZero => TZero
+  | TAtom a => TAtom (map_atom f a)
+  | TMol t1 t2 => TMol (rename_term f t1) (rename_term f t2)
+  end.
+
+Lemma flatten_rename_term : forall f t,
+  flatten_atoms (rename_term f t) = map (map_atom f) (flatten_atoms t).
+Proof.
+  induction t as [| a | t1 IH1 t2 IH2 ]; simpl; auto.
+  rewrite IH1, IH2, map_app. reflexivity.
+Qed.
+
+Lemma rename_term_ext : forall f g t,
+  (forall X, In X (links t) -> f X = g X) ->
+  rename_term f t = rename_term g t.
+Proof.
+  induction t as [| a | t1 IH1 t2 IH2 ]; intros H; simpl; auto.
+  - f_equal. destruct a as [p ls|x y]; simpl.
+    + f_equal. apply map_ext_in. intros z Hz. apply H. simpl. exact Hz.
+    + f_equal; apply H; simpl; auto.
+  - simpl in H. f_equal.
+    + apply IH1. intros X HX. apply H, in_or_app. auto.
+    + apply IH2. intros X HX. apply H, in_or_app. auto.
+Qed.
+
+Lemma rename_term_id : forall t, rename_term (fun x => x) t = t.
+Proof.
+  induction t as [| a | t1 IH1 t2 IH2 ]; simpl; auto.
+  - f_equal. apply map_atom_id.
+  - rewrite IH1, IH2. reflexivity.
+Qed.
+
+Lemma flatten_substitute : forall Y X t,
+  flatten_atoms (substitute Y X t)
+  = map (map_atom (substitute_link Y X)) (flatten_atoms t).
+Proof.
+  induction t as [| a | t1 IH1 t2 IH2 ]; simpl.
+  - reflexivity.
+  - destruct a as [p ls|x y]; reflexivity.
+  - rewrite IH1, IH2, map_app. reflexivity.
+Qed.
+
+Lemma locallink_stable_subst : forall P X Y X',
+  X <> Y -> X' <> X -> X' <> Y ->
+  In X' (locallinks P) -> In X' (locallinks (substitute Y X P)).
+Proof.
+  intros P X Y X' HXY HX' HX'Y H.
+  rewrite in_locallinks in *.
+  rewrite (subst_multiplicity_other P X Y X'); auto.
+Qed.
+
+Lemma links_subst_notY : forall P X Y Z,
+  X <> Y -> Z <> Y -> In Z (links (substitute Y X P)) -> In Z (links P).
+Proof.
+  intros P X Y Z HXY HZY Hin.
+  apply in_links_link_multiset in Hin.
+  apply in_links_link_multiset.
+  destruct (Leq_dec Z X) as [->|HZX].
+  - rewrite subst_multiplicity_X in Hin by auto. lia.
+  - rewrite subst_multiplicity_other in Hin; auto.
+Qed.
+
+Fixpoint apply_subs (ps : list (Link * Link)) (t : Term) : Term :=
+  match ps with
+  | [] => t
+  | (x, y) :: rest => apply_subs rest (substitute y x t)
+  end.
+
+Lemma congm_rename_locals : forall Xs Ys P,
+  wellformed_t P ->
+  length Xs = length Ys ->
+  NoDup Xs -> NoDup Ys ->
+  (forall X, In X Xs -> In X (locallinks P)) ->
+  (forall Y, In Y Ys -> ~ In Y (links P)) ->
+  (forall X Y, In X Xs -> In Y Ys -> X <> Y) ->
+  P ==m apply_subs (combine Xs Ys) P.
+Proof.
+  induction Xs as [|X Xs IH]; intros Ys P WFP Hlen HnX HnY HlocX HfrY Hdisj.
+  - simpl. apply congm_refl. exact WFP.
+  - destruct Ys as [|Y Ys]; [ discriminate |]. simpl in Hlen. injection Hlen as Hlen.
+    inversion HnX as [|? ? HXnotin HnX']; subst.
+    inversion HnY as [|? ? HYnotin HnY']; subst.
+    assert (HXloc : In X (locallinks P)) by (apply HlocX; left; reflexivity).
+    assert (HXY : X <> Y) by (apply Hdisj; left; reflexivity).
+    assert (HYfr : ~ In Y (links P)) by (apply HfrY; left; reflexivity).
+    assert (HmX : multiplicity (link_multiset P) X = 2)
+      by (apply in_locallinks; exact HXloc).
+    assert (HmY : multiplicity (link_multiset P) Y = 0)
+      by (apply multiplicity_not_in; exact HYfr).
+    assert (WFP' : wellformed_t (substitute Y X P)).
+    { apply subst_wellformed_t; [ exact WFP | rewrite HmX, HmY; lia ]. }
+    assert (Hstep : P ==m substitute Y X P)
+      by (apply congm_E4; assumption).
+    assert (HlocX' : forall X', In X' Xs -> In X' (locallinks (substitute Y X P))).
+    { intros X' HX'. apply locallink_stable_subst;
+        [ exact HXY
+        | intro E; apply HXnotin; rewrite <- E; exact HX'
+        | intro E; apply (Hdisj X' Y);
+            [ right; exact HX' | left; reflexivity | exact E ]
+        | apply HlocX; right; exact HX' ]. }
+    assert (HfrY' : forall Y', In Y' Ys -> ~ In Y' (links (substitute Y X P))).
+    { intros Y' HY' Hin.
+      apply (links_subst_notY P X Y Y') in Hin;
+        [ apply (HfrY Y'); [ right; exact HY' | exact Hin ]
+        | exact HXY
+        | intro E; apply HYnotin; rewrite <- E; exact HY' ]. }
+    assert (Hdisj' : forall X' Y', In X' Xs -> In Y' Ys -> X' <> Y').
+    { intros X' Y' HX' HY'. apply Hdisj; right; assumption. }
+    change (apply_subs (combine (X :: Xs) (Y :: Ys)) P)
+      with (apply_subs (combine Xs Ys) (substitute Y X P)).
+    apply congm_trans' with (substitute Y X P); [ exact Hstep |].
+    exact (IH Ys (substitute Y X P) WFP' Hlen HnX' HnY' HlocX' HfrY' Hdisj').
+Qed.
+
+Fixpoint subst_link_chain (ps : list (Link * Link)) (z : Link) : Link :=
+  match ps with
+  | [] => z
+  | (x, y) :: rest => subst_link_chain rest (substitute_link y x z)
+  end.
+
+Lemma flatten_apply_subs : forall ps t,
+  flatten_atoms (apply_subs ps t)
+  = map (map_atom (subst_link_chain ps)) (flatten_atoms t).
+Proof.
+  induction ps as [|[x y] rest IH]; intros t; simpl.
+  - rewrite map_map_atom_id. reflexivity.
+  - rewrite IH, flatten_substitute, map_map.
+    apply map_ext. intros a. rewrite map_atom_comp. reflexivity.
+Qed.
+
+Lemma subst_link_chain_miss : forall Xs Ys z,
+  length Xs = length Ys -> ~ In z Xs -> ~ In z Ys ->
+  subst_link_chain (combine Xs Ys) z = z.
+Proof.
+  induction Xs as [|x Xs IH]; intros Ys z Hlen HnX HnY.
+  - reflexivity.
+  - destruct Ys as [|y Ys]; [ discriminate |]. simpl in Hlen. injection Hlen as Hlen.
+    simpl. unfold substitute_link.
+    destruct (z =? x) eqn:E.
+    { apply eqb_eq in E. exfalso. apply HnX. left. auto. }
+    apply IH; auto; intro; [ apply HnX | apply HnY ]; right; auto.
+Qed.
+
+Lemma subst_link_chain_hit : forall Xs Ys i x y,
+  NoDup Xs -> NoDup Ys -> length Xs = length Ys ->
+  (forall a, In a Ys -> ~ In a Xs) ->
+  nth_error Xs i = Some x -> nth_error Ys i = Some y ->
+  subst_link_chain (combine Xs Ys) x = y.
+Proof.
+  induction Xs as [|x0 Xs IH]; intros Ys i x y HnX HnY Hlen Hdisj HeX HeY.
+  - destruct i; discriminate.
+  - destruct Ys as [|y0 Ys]; [ discriminate |]. simpl in Hlen. injection Hlen as Hlen.
+    inversion HnX as [|? ? Hx0 HnX']; subst.
+    inversion HnY as [|? ? Hy0 HnY']; subst.
+    destruct i as [|i']; simpl in HeX, HeY.
+    + injection HeX as ->. injection HeY as ->.
+      simpl. unfold substitute_link. rewrite eqb_refl.
+      apply subst_link_chain_miss;
+        [ exact Hlen
+        | intro Hin; apply (Hdisj y); [ left; reflexivity | right; exact Hin ]
+        | exact Hy0 ].
+    + simpl. unfold substitute_link.
+      assert (Hxx0 : x <> x0).
+      { intro E. apply Hx0. rewrite <- E. eapply nth_error_In; eauto. }
+      apply eqb_neq in Hxx0. rewrite Hxx0.
+      apply (IH Ys i' x y HnX' HnY' Hlen); auto.
+      intros a Ha Hin. apply (Hdisj a); [ right; exact Ha | right; exact Hin ].
+Qed.
+
+(* --- extracting the link renaming from a connector-free giso --- *)
+
+Definition has_port (P : Term) (X : Link) : Prop :=
+  exists i k, portlink (node_atoms P) i k = Some X.
+
+Lemma edge_eq_nil_cf : forall t x y,
+  term_conns t = [] -> (edge_eq (term_conns t) x y <-> x = y).
+Proof. intros t x y H. rewrite H. apply edge_eq_nil. Qed.
+
+Section GisoPhi.
+Variables (f g : nat -> nat) (P Q : Term).
+Hypothesis Hgf : forall i, g (f i) = i.
+Hypothesis Hfg : forall i, f (g i) = i.
+Hypothesis Hfun : forall i,
+  option_map get_functor (nth_error (node_atoms P) i)
+  = option_map get_functor (nth_error (node_atoms Q) (f i)).
+Hypothesis Hconn : forall i k j l Xik Xjl Yik Yjl,
+  portlink (node_atoms P) i k = Some Xik ->
+  portlink (node_atoms P) j l = Some Xjl ->
+  portlink (node_atoms Q) (f i) k = Some Yik ->
+  portlink (node_atoms Q) (f j) l = Some Yjl ->
+  (edge_eq (term_conns P) Xik Xjl <-> edge_eq (term_conns Q) Yik Yjl).
+Hypothesis HcfP : term_conns P = [].
+Hypothesis HcfQ : term_conns Q = [].
+
+Lemma phi_unique : forall X, has_port P X ->
+  exists ! Y, forall i k, portlink (node_atoms P) i k = Some X ->
+                          portlink (node_atoms Q) (f i) k = Some Y.
+Proof.
+  intros X [i0 [k0 Hp0]].
+  destruct (giso_port_mid f P Q i0 k0 X Hfun Hp0) as [Y0 HY0].
+  exists Y0. split.
+  - intros i k Hp.
+    destruct (giso_port_mid f P Q i k X Hfun Hp) as [Y HY].
+    assert (E := Hconn i k i0 k0 X X Y Y0 Hp Hp0 HY HY0).
+    rewrite (edge_eq_nil_cf P X X HcfP) in E.
+    rewrite (edge_eq_nil_cf Q Y Y0 HcfQ) in E.
+    rewrite <- (proj1 E eq_refl). exact HY.
+  - intros Y' HY'. specialize (HY' i0 k0 Hp0). congruence.
+Qed.
+
+Definition phi (X : Link) : Link :=
+  match excluded_middle_informative (has_port P X) with
+  | left H => proj1_sig (constructive_definite_description _ (phi_unique X H))
+  | right _ => X
+  end.
+
+Lemma phi_port : forall X i k,
+  portlink (node_atoms P) i k = Some X ->
+  portlink (node_atoms Q) (f i) k = Some (phi X).
+Proof.
+  intros X i k Hp. unfold phi.
+  destruct (excluded_middle_informative (has_port P X)) as [H|H].
+  - destruct (constructive_definite_description _ _) as [Y HY]. simpl.
+    apply HY. exact Hp.
+  - exfalso. apply H. exists i, k. exact Hp.
+Qed.
+
+End GisoPhi.
+
+Lemma node_atoms_cf : forall t, connector_free t -> node_atoms t = flatten_atoms t.
+Proof.
+  induction t as [| a | t1 IH1 t2 IH2 ]; intros H.
+  - reflexivity.
+  - destruct a; [ reflexivity | destruct H ].
+  - simpl in H. destruct H as [H1 H2].
+    rewrite node_atoms_mol, (IH1 H1), (IH2 H2). reflexivity.
+Qed.
+
+Lemma term_conns_cf : forall t, connector_free t -> term_conns t = [].
+Proof.
+  induction t as [| a | t1 IH1 t2 IH2 ]; intros H.
+  - reflexivity.
+  - destruct a; [ reflexivity | destruct H ].
+  - simpl in H. destruct H as [H1 H2].
+    rewrite term_conns_mol, (IH1 H1), (IH2 H2). reflexivity.
+Qed.
+
+Lemma In_links_has_port : forall P X,
+  connector_free P -> In X (links P) -> has_port P X.
+Proof.
+  intros P X Hcf Hin.
+  rewrite links_flatten in Hin. rewrite in_flat_map in Hin.
+  destruct Hin as [a [Ha HXa]].
+  rewrite <- (node_atoms_cf P Hcf) in Ha.
+  apply In_nth_error in Ha. destruct Ha as [i Hi].
+  destruct a as [p ls|x y].
+  - simpl in HXa. apply In_nth_error in HXa. destruct HXa as [k Hk].
+    exists i, k. unfold portlink. rewrite Hi. exact Hk.
+  - assert (Hff := node_atoms_aatom P).
+    rewrite Forall_forall in Hff.
+    apply nth_error_In in Hi. apply Hff in Hi. contradiction.
+Qed.
+
+Lemma phi_free_id : forall f P Q Hfun Hconn HcfP HcfQ,
+  connector_free P -> connector_free Q ->
+  (forall i k Z Xik Yik,
+     In Z (freelinks P) ->
+     portlink (node_atoms P) i k = Some Xik ->
+     portlink (node_atoms Q) (f i) k = Some Yik ->
+     (edge_eq (term_conns P) Xik Z <-> edge_eq (term_conns Q) Yik Z)) ->
+  forall X, In X (freelinks P) ->
+    phi f P Q Hfun Hconn HcfP HcfQ X = X.
+Proof.
+  intros f P Q Hfun Hconn HcfP HcfQ HcfP' HcfQ' Hifc X HX.
+  assert (Hpx : has_port P X).
+  { apply In_links_has_port; auto. apply in_freelinks_In_links, HX. }
+  destruct Hpx as [i [k Hp]].
+  assert (Hq := phi_port f P Q Hfun Hconn HcfP HcfQ X i k Hp).
+  assert (E := Hifc i k X X (phi f P Q Hfun Hconn HcfP HcfQ X) HX Hp Hq).
+  rewrite (edge_eq_nil_cf P X X HcfP) in E.
+  rewrite (edge_eq_nil_cf Q _ X HcfQ) in E.
+  exact (proj1 E eq_refl).
+Qed.
+
+Lemma phi_perm : forall f g P Q Hfun Hconn HcfP HcfQ,
+  (forall i, f (g i) = i) ->
+  (forall j, j < length (node_atoms Q) -> g j < length (node_atoms P)) ->
+  (forall i, i < length (node_atoms P) -> f i < length (node_atoms Q)) ->
+  connector_free P -> connector_free Q ->
+  length (node_atoms P) = length (node_atoms Q) ->
+  Permutation (map (map_atom (phi f P Q Hfun Hconn HcfP HcfQ)) (flatten_atoms P))
+              (flatten_atoms Q).
+Proof.
+  intros f g P Q Hfun Hconn HcfP HcfQ Hfg Hcod Hdom HcfP' HcfQ' Hlen.
+  set (ph := phi f P Q Hfun Hconn HcfP HcfQ).
+  rewrite <- (node_atoms_cf P HcfP'), <- (node_atoms_cf Q HcfQ').
+  apply Permutation_nth_error.
+  split.
+  { rewrite length_map. exact Hlen. }
+  exists g. split.
+  { intros x y Hxy. rewrite <- (Hfg x), <- (Hfg y), Hxy. reflexivity. }
+  intros j. rewrite nth_error_map.
+  destruct (nth_error (node_atoms P) (g j)) as [a|] eqn:Ea.
+  - assert (Haa : exists p ls, a = AAtom p ls).
+    { assert (HF := node_atoms_aatom P). rewrite Forall_forall in HF.
+      apply nth_error_In in Ea. apply HF in Ea.
+      destruct a as [p ls|x y]; [ eauto | contradiction ]. }
+    destruct Haa as [p [ls ->]].
+    assert (Hfunj := Hfun (g j)). rewrite Hfg in Hfunj. rewrite Ea in Hfunj.
+    destruct (nth_error (node_atoms Q) j) as [b|] eqn:Eb;
+      [ | cbn in Hfunj; discriminate ].
+    assert (Hbb : exists p' ls', b = AAtom p' ls').
+    { assert (HF := node_atoms_aatom Q). rewrite Forall_forall in HF.
+      apply nth_error_In in Eb. apply HF in Eb.
+      destruct b as [p' ls'|x y]; [ eauto | contradiction ]. }
+    destruct Hbb as [p' [ls' ->]].
+    cbn in Hfunj.
+    injection Hfunj as Hp Hll.
+    subst p'. simpl.
+    f_equal. f_equal. f_equal.
+    apply nth_error_ext. intros k.
+    rewrite nth_error_map.
+    destruct (nth_error ls k) as [x|] eqn:Ex.
+    + assert (Hpx : portlink (node_atoms P) (g j) k = Some x)
+        by (unfold portlink; rewrite Ea; exact Ex).
+      assert (Hq := phi_port f P Q Hfun Hconn HcfP HcfQ x (g j) k Hpx).
+      rewrite Hfg in Hq.
+      unfold portlink in Hq. rewrite Eb in Hq. rewrite Hq. reflexivity.
+    + apply nth_error_None in Ex.
+      destruct (nth_error ls' k) as [y|] eqn:Ey; [ | reflexivity ].
+      exfalso.
+      assert (k < length ls') by (apply nth_error_Some; rewrite Ey; discriminate).
+      lia.
+  - destruct (nth_error (node_atoms Q) j) as [b|] eqn:Eb; [ | reflexivity ].
+    exfalso.
+    apply nth_error_None in Ea.
+    assert (j < length (node_atoms Q)).
+    { apply nth_error_Some. rewrite Eb. discriminate. }
+    apply Hcod in H. lia.
+Qed.
+
+Lemma map_atom_ext_in : forall (f g : Link -> Link) a,
+  (forall x, In x (links_of_atom a) -> f x = g x) ->
+  map_atom f a = map_atom g a.
+Proof.
+  intros f g [p ls|x y] H; simpl in *; f_equal.
+  - apply map_ext_in. exact H.
+  - apply H. auto.
+  - apply H. auto.
+Qed.
+
+Lemma map_map_atom_ext_in : forall (f g : Link -> Link) l,
+  (forall x, In x (flat_map links_of_atom l) -> f x = g x) ->
+  map (map_atom f) l = map (map_atom g) l.
+Proof.
+  intros f g l H. apply map_ext_in. intros a Ha.
+  apply map_atom_ext_in. intros x Hx. apply H.
+  apply in_flat_map. exists a. auto.
+Qed.
+
+Lemma locallinks_freelinks_disjoint : forall t X,
+  In X (locallinks t) -> In X (freelinks t) -> False.
+Proof.
+  intros t X H1 H2. rewrite in_locallinks in H1. rewrite in_freelinks in H2. lia.
+Qed.
+
+Lemma phi_inj : forall f P Q Hfun Hconn HcfP HcfQ,
+  connector_free P -> connector_free Q ->
+  forall X X', In X (links P) -> In X' (links P) ->
+    phi f P Q Hfun Hconn HcfP HcfQ X = phi f P Q Hfun Hconn HcfP HcfQ X' -> X = X'.
+Proof.
+  intros f P Q Hfun Hconn HcfP HcfQ HcfP' HcfQ' X X' HX HX' Heq.
+  destruct (In_links_has_port P X HcfP' HX) as [i [k Hp]].
+  destruct (In_links_has_port P X' HcfP' HX') as [i' [k' Hp']].
+  assert (Hq  := phi_port f P Q Hfun Hconn HcfP HcfQ X i k Hp).
+  assert (Hq' := phi_port f P Q Hfun Hconn HcfP HcfQ X' i' k' Hp').
+  rewrite Heq in Hq.
+  assert (E := Hconn i k i' k' X X' _ _ Hp Hp' Hq Hq').
+  rewrite (edge_eq_nil_cf P X X' HcfP) in E.
+  rewrite (edge_eq_nil_cf Q _ _ HcfQ) in E.
+  apply (proj2 E). reflexivity.
+Qed.
+
+Lemma NoDup_locallinks : forall t, NoDup (locallinks t).
+Proof.
+  intros t. unfold locallinks. apply NoDup_filter.
+  unfold unique_links. apply NoDup_nodup.
+Qed.
+
+Lemma flat_map_links_map_atom : forall (r : Link -> Link) l,
+  flat_map links_of_atom (map (map_atom r) l) = map r (flat_map links_of_atom l).
+Proof.
+  induction l as [|a l IH]; simpl; auto.
+  rewrite IH, links_of_atom_map_atom, map_app. reflexivity.
+Qed.
+
+Lemma link_multiset_flatten_eq : forall t1 t2,
+  flatten_atoms t1 = flatten_atoms t2 ->
+  link_multiset t1 = link_multiset t2.
+Proof.
+  intros t1 t2 H. unfold link_multiset. rewrite !links_flatten, H. reflexivity.
+Qed.
+
+Lemma link_multiset_rename : forall (r : Link -> Link) t Y,
+  multiplicity (link_multiset (rename_term r t)) Y
+  = multiplicity (list_to_multiset (map r (links t))) Y.
+Proof.
+  intros r t Y. unfold link_multiset.
+  rewrite links_flatten, flatten_rename_term, flat_map_links_map_atom.
+  rewrite <- links_flatten. reflexivity.
+Qed.
+
+Lemma mult_cons : forall x l y,
+  multiplicity (list_to_multiset (x :: l)) y
+  = (if Leq_dec x y then 1 else 0) + multiplicity (list_to_multiset l) y.
+Proof. reflexivity. Qed.
+
+Lemma mult_rename_eq : forall (r : Link -> Link) ll X0,
+  (forall x, In x ll -> r x = r X0 -> x = X0) ->
+  multiplicity (list_to_multiset (map r ll)) (r X0)
+  = multiplicity (list_to_multiset ll) X0.
+Proof.
+  induction ll as [|x ll IH]; intros X0 Hinj.
+  - reflexivity.
+  - simpl (map r _). rewrite !mult_cons.
+    destruct (Leq_dec (r x) (r X0)) as [E|E].
+    + assert (Hx : x = X0) by (apply (Hinj x); [ left; reflexivity | exact E ]).
+      subst x. rewrite Leq_dec_refl. cbn [Nat.add].
+      f_equal. apply IH. intros z Hz. apply Hinj. right. exact Hz.
+    + destruct (Leq_dec x X0) as [Ex|Ex]; [ subst x; congruence |].
+      cbn [Nat.add]. apply IH. intros z Hz. apply Hinj. right. exact Hz.
+Qed.
+
+Lemma mult_rename_notimg : forall (r : Link -> Link) ll Y,
+  (forall x, In x ll -> r x <> Y) ->
+  multiplicity (list_to_multiset (map r ll)) Y = 0.
+Proof.
+  induction ll as [|x ll IH]; intros Y H.
+  - reflexivity.
+  - simpl (map r _). rewrite mult_cons.
+    destruct (Leq_dec (r x) Y) as [E|E].
+    + exfalso. apply (H x); [ left; reflexivity | exact E ].
+    + cbn [Nat.add]. apply IH. intros z Hz. apply H. right. exact Hz.
+Qed.
+
+Lemma In_locallinks_links : forall t X, In X (locallinks t) -> In X (links t).
+Proof.
+  intros t X H. apply in_locallinks in H.
+  apply in_links_link_multiset. lia.
+Qed.
+
+Lemma nth_error_ex : forall {A} (l : list A) i,
+  i < length l -> exists a, nth_error l i = Some a.
+Proof.
+  intros A l i H. destruct (nth_error l i) as [a|] eqn:E.
+  - exists a. reflexivity.
+  - apply nth_error_None in E. lia.
+Qed.
+
+Lemma chain_hit_of_in : forall Xs Ys X,
+  NoDup Xs -> NoDup Ys -> length Xs = length Ys ->
+  (forall a, In a Ys -> ~ In a Xs) ->
+  In X Xs ->
+  exists y, In y Ys /\ subst_link_chain (combine Xs Ys) X = y.
+Proof.
+  intros Xs Ys X HnX HnY Hlen Hdisj Hin.
+  apply In_nth_error in Hin. destruct Hin as [i HeX].
+  assert (Hi : i < length Ys).
+  { rewrite <- Hlen. apply nth_error_Some. rewrite HeX. discriminate. }
+  destruct (nth_error_ex Ys i Hi) as [y HeY].
+  exists y. split; [ eapply nth_error_In; eauto |].
+  eapply subst_link_chain_hit; eauto.
+Qed.
+
+Lemma subst_link_chain_inj_on : forall Xs Ys (S : list Link),
+  NoDup Xs -> NoDup Ys -> length Xs = length Ys ->
+  (forall a, In a Ys -> ~ In a Xs) ->
+  (forall a, In a Ys -> ~ In a S) ->
+  forall X X', In X S -> In X' S ->
+    subst_link_chain (combine Xs Ys) X = subst_link_chain (combine Xs Ys) X' -> X = X'.
+Proof.
+  intros Xs Ys S HnX HnY Hlen Hdisj HdisjS X X' HX HX' Heq.
+  assert (Hmiss : forall z, In z S -> ~ In z Xs ->
+                  subst_link_chain (combine Xs Ys) z = z).
+  { intros z HzS HzX. apply subst_link_chain_miss; auto.
+    intro. apply (HdisjS z); auto. }
+  assert (Hhit : forall z, In z Xs -> exists i w,
+                  nth_error Xs i = Some z /\ nth_error Ys i = Some w /\
+                  In w Ys /\ subst_link_chain (combine Xs Ys) z = w).
+  { intros z HzX. apply In_nth_error in HzX. destruct HzX as [i HeX].
+    assert (Hi : i < length Ys)
+      by (rewrite <- Hlen; apply nth_error_Some; rewrite HeX; discriminate).
+    destruct (nth_error_ex Ys i Hi) as [w Hw].
+    exists i, w. repeat split; auto.
+    - eapply nth_error_In; eauto.
+    - eapply subst_link_chain_hit; eauto. }
+  destruct (classic (In X Xs)) as [HXin|HXin];
+  destruct (classic (In X' Xs)) as [HX'in|HX'in].
+  - destruct (Hhit X HXin) as [i [w [HeX [HeY [HwY Hv]]]]].
+    destruct (Hhit X' HX'in) as [i' [w' [HeX' [HeY' [Hw'Y Hv']]]]].
+    rewrite Hv, Hv' in Heq. subst w'.
+    assert (i = i').
+    { apply (proj1 (NoDup_nth_error Ys) HnY i i').
+      - apply nth_error_Some. rewrite HeY. discriminate.
+      - rewrite HeY, HeY'. reflexivity. }
+    subst i'. rewrite HeX in HeX'. injection HeX' as ->. reflexivity.
+  - exfalso. destruct (Hhit X HXin) as [i [w [HeX [HeY [HwY Hv]]]]].
+    rewrite Hv, (Hmiss X' HX' HX'in) in Heq. subst w.
+    apply (HdisjS X' HwY HX').
+  - exfalso. destruct (Hhit X' HX'in) as [i [w [HeX [HeY [HwY Hv]]]]].
+    rewrite Hv, (Hmiss X HX HXin) in Heq. subst w.
+    apply (HdisjS X HwY HX).
+  - rewrite (Hmiss X HX HXin), (Hmiss X' HX' HX'in) in Heq. exact Heq.
+Qed.
+
+Lemma chain_surj : forall Xs Ys Z,
+  NoDup Xs -> NoDup Ys -> length Xs = length Ys ->
+  (forall a, In a Ys -> ~ In a Xs) ->
+  In Z Ys -> exists X, In X Xs /\ subst_link_chain (combine Xs Ys) X = Z.
+Proof.
+  intros Xs Ys Z HnX HnY Hlen Hdisj HZ.
+  apply In_nth_error in HZ. destruct HZ as [i HeY].
+  assert (Hi : i < length Xs)
+    by (rewrite Hlen; apply nth_error_Some; rewrite HeY; discriminate).
+  destruct (nth_error_ex Xs i Hi) as [X HeX].
+  exists X. split; [ eapply nth_error_In; eauto |].
+  eapply subst_link_chain_hit; eauto.
+Qed.
+
+Lemma phi_In_links_Q : forall f P Q Hfun Hconn HcfP HcfQ,
+  connector_free P ->
+  forall X, In X (links P) -> In (phi f P Q Hfun Hconn HcfP HcfQ X) (links Q).
+Proof.
+  intros f P Q Hfun Hconn HcfP HcfQ HcfP' X HX.
+  destruct (In_links_has_port P X HcfP' HX) as [i [k Hp]].
+  assert (Hq := phi_port f P Q Hfun Hconn HcfP HcfQ X i k Hp).
+  eapply portlink_In_links; eauto.
+Qed.
+
+Lemma nu_compose_on : forall Ls Zs Ts (rho : Link -> Link) X,
+  NoDup Ls -> NoDup Zs -> NoDup Ts ->
+  length Ls = length Zs -> length Zs = length Ts ->
+  Ts = map rho Ls ->
+  (forall a, In a Zs -> ~ In a Ls) ->
+  (forall a, In a Zs -> ~ In a Ts) ->
+  In X Ls ->
+  subst_link_chain (combine Zs Ts) (subst_link_chain (combine Ls Zs) X) = rho X.
+Proof.
+  intros Ls Zs Ts rho X HnL HnZ HnT HlLZ HlZT HTdef HZL HZT HX.
+  apply In_nth_error in HX. destruct HX as [i HeL].
+  assert (Hi : i < length Zs)
+    by (rewrite <- HlLZ; apply nth_error_Some; rewrite HeL; discriminate).
+  destruct (nth_error_ex Zs i Hi) as [w Hw].
+  assert (Ev1 := subst_link_chain_hit Ls Zs i X w HnL HnZ HlLZ HZL HeL Hw).
+  rewrite Ev1.
+  assert (HeT : nth_error Ts i = Some (rho X)).
+  { rewrite HTdef, nth_error_map, HeL. reflexivity. }
+  apply (subst_link_chain_hit Zs Ts i w (rho X) HnZ HnT HlZT); auto.
+  intros a Ha Hin. apply (HZT a Hin Ha).
+Qed.
+
+Lemma in_locallinks_or_free : forall P X,
+  wellformed_t P -> In X (links P) ->
+  In X (locallinks P) \/ In X (freelinks P).
+Proof.
+  intros P X W HX.
+  assert (H1 : 1 <= multiplicity (link_multiset P) X)
+    by (apply in_links_link_multiset; exact HX).
+  assert (H2 := wellformed_t_mult_le P X W).
+  destruct (multiplicity (link_multiset P) X) as [|[|[|n]]] eqn:E; try lia.
+  - right. apply in_freelinks. lia.
+  - left. apply in_locallinks. lia.
+Qed.
+
+Lemma congm_rename_by : forall P (rho : Link -> Link),
+  wellformed_t P ->
+  (forall X, In X (freelinks P) -> rho X = X) ->
+  (forall X X', In X (links P) -> In X' (links P) -> rho X = rho X' -> X = X') ->
+  (forall X, In X (locallinks P) -> ~ In (rho X) (freelinks P)) ->
+  exists P2,
+    P ==m P2 /\ flatten_atoms P2 = map (map_atom rho) (flatten_atoms P).
+Proof.
+  intros P rho WFP Hfr Hinj Hnf.
+  set (Ls := locallinks P).
+  set (Ts := map rho Ls).
+  assert (HnLs : NoDup Ls) by apply NoDup_locallinks.
+  assert (HLsL : forall X, In X Ls -> In X (links P)) by (apply In_locallinks_links).
+  assert (HnTs : NoDup Ts).
+  { apply NoDup_map_NoDup_ForallPairs; [ | exact HnLs ].
+    intros a b Ha Hb Hab. apply Hinj; [ apply HLsL; exact Ha | apply HLsL; exact Hb | exact Hab ]. }
+  destruct (fresh_links (links P ++ Ts) (length Ls))
+    as (Zs & HZlen & HZnd & HZfr & _).
+  assert (HZnP : forall Z, In Z Zs -> ~ In Z (links P))
+    by (intros Z HZ HC; apply (HZfr Z HZ); apply in_or_app; auto).
+  assert (HZnTs : forall Z, In Z Zs -> ~ In Z Ts)
+    by (intros Z HZ HC; apply (HZfr Z HZ); apply in_or_app; auto).
+  assert (HZnLs : forall Z, In Z Zs -> ~ In Z Ls)
+    by (intros Z HZ HC; apply (HZnP Z HZ), HLsL, HC).
+  assert (HlenLZ : length Ls = length Zs) by (rewrite HZlen; reflexivity).
+  assert (HlenZT : length Zs = length Ts).
+  { unfold Ts. rewrite length_map. symmetry. exact HlenLZ. }
+  assert (HZfrP : forall Z, In Z Zs -> ~ In Z (freelinks P))
+    by (intros Z HZ HC; apply (HZnP Z HZ), in_freelinks_In_links, HC).
+  remember (subst_link_chain (combine Ls Zs)) as nu1 eqn:Hnu1.
+  assert (Hnu1inj : forall X X', In X (links P) -> In X' (links P) ->
+                    nu1 X = nu1 X' -> X = X').
+  { intros X X' HX HX' Heq. rewrite Hnu1 in Heq.
+    exact (subst_link_chain_inj_on Ls Zs (links P) HnLs HZnd HlenLZ HZnLs HZnP
+             X X' HX HX' Heq). }
+  assert (Hnu1hit : forall X, In X Ls -> In (nu1 X) Zs).
+  { intros X HX.
+    destruct (chain_hit_of_in Ls Zs X HnLs HZnd HlenLZ HZnLs HX) as [y [Hy Hyv]].
+    rewrite <- Hnu1 in Hyv. rewrite Hyv. exact Hy. }
+  assert (Hnu1miss : forall X, ~ In X Ls -> ~ In X Zs -> nu1 X = X).
+  { intros X HX HZ. rewrite Hnu1. apply subst_link_chain_miss; auto. }
+  set (P1 := apply_subs (combine Ls Zs) P).
+  assert (Hstep1 : P ==m P1).
+  { apply congm_rename_locals; auto.
+    intros X Z HX HZ ->. apply (HZnLs Z HZ HX). }
+  assert (WFP1 : wellformed_t P1)
+    by exact (proj2 (congm_wellformed_t _ _ Hstep1)).
+  assert (HflatP1 : flatten_atoms P1 = map (map_atom nu1) (flatten_atoms P)).
+  { rewrite Hnu1. apply flatten_apply_subs. }
+  assert (HlmP1 : forall Y, multiplicity (link_multiset P1) Y
+                          = multiplicity (list_to_multiset (map nu1 (links P))) Y).
+  { intros Y.
+    rewrite (link_multiset_flatten_eq P1 (rename_term nu1 P))
+      by (rewrite HflatP1, flatten_rename_term; reflexivity).
+    apply link_multiset_rename. }
+  assert (HZloc : forall Z, In Z Zs -> In Z (locallinks P1)).
+  { intros Z HZ.
+    destruct (chain_surj Ls Zs Z HnLs HZnd HlenLZ HZnLs HZ) as [X [HX HXv]].
+    rewrite <- Hnu1 in HXv.
+    apply in_locallinks. rewrite HlmP1. rewrite <- HXv.
+    rewrite (mult_rename_eq nu1 (links P) X).
+    - fold (link_multiset P). apply in_locallinks. exact HX.
+    - intros z Hz Hzeq. apply Hnu1inj; auto using HLsL. }
+  assert (HTnP1 : forall T, In T Ts -> ~ In T (links P1)).
+  { intros T HT HC.
+    apply in_map_iff in HT. destruct HT as [X [HXeq HX]].
+    apply in_links_link_multiset in HC. rewrite HlmP1 in HC.
+    rewrite (mult_rename_notimg nu1 (links P) T) in HC; [ lia |].
+    intros z Hz Hzeq.
+    destruct (in_locallinks_or_free P z WFP Hz) as [Hzl|Hzf].
+    - apply Hnu1hit in Hzl. rewrite Hzeq, <- HXeq in Hzl.
+      apply (HZnTs (rho X) Hzl). apply in_map. exact HX.
+    - assert (Hznl : ~ In z Ls)
+        by (intro C; apply (locallinks_freelinks_disjoint P z); [ exact C | exact Hzf ]).
+      assert (Hznz : ~ In z Zs) by (intro C; apply (HZfrP z C Hzf)).
+      rewrite (Hnu1miss z Hznl Hznz) in Hzeq.
+      apply (Hnf X HX). rewrite HXeq, <- Hzeq. exact Hzf. }
+  set (P2 := apply_subs (combine Zs Ts) P1).
+  assert (Hstep2 : P1 ==m P2).
+  { apply congm_rename_locals; auto.
+    intros Z T HZ HT E. subst T. apply (HZnTs Z HZ HT). }
+  remember (subst_link_chain (combine Zs Ts)) as nu2 eqn:Hnu2.
+  assert (Hnu2flat : flatten_atoms P2 = map (map_atom nu2) (flatten_atoms P1)).
+  { rewrite Hnu2. apply flatten_apply_subs. }
+  assert (Hcompose : forall z, In z (links P) -> nu2 (nu1 z) = rho z).
+  { intros z Hz.
+    destruct (in_locallinks_or_free P z WFP Hz) as [Hzl|Hzf].
+    - assert (E := nu_compose_on Ls Zs Ts rho z HnLs HZnd HnTs
+                    HlenLZ HlenZT eq_refl HZnLs HZnTs Hzl).
+      rewrite Hnu1, Hnu2. exact E.
+    - assert (Hznl : ~ In z Ls)
+        by (intro C; apply (locallinks_freelinks_disjoint P z); [ exact C | exact Hzf ]).
+      assert (Hznz : ~ In z Zs) by (intro C; apply (HZfrP z C Hzf)).
+      assert (Hznt : ~ In z Ts).
+      { intro C. apply in_map_iff in C. destruct C as [w [Hw Hwl]].
+        apply (Hnf w Hwl). rewrite Hw. exact Hzf. }
+      rewrite (Hnu1miss z Hznl Hznz).
+      rewrite Hnu2. rewrite subst_link_chain_miss; auto.
+      symmetry. apply Hfr. exact Hzf. }
+  exists P2. split.
+  - apply congm_trans' with P1; assumption.
+  - rewrite Hnu2flat, HflatP1, map_map.
+    apply map_ext_in. intros a Ha.
+    rewrite map_atom_comp.
+    apply map_atom_ext_in. intros x Hx.
+    apply Hcompose.
+    rewrite links_flatten. apply in_flat_map. exists a. auto.
+Qed.
+
+Lemma giso_cf_congm : forall P Q,
+  wellformed_t P -> wellformed_t Q ->
+  connector_free P -> connector_free Q ->
+  giso (freelinks P) P Q -> P ==m Q.
+Proof.
+  intros P Q WFP WFQ HcfP HcfQ Hiso.
+  assert (Hlen := giso_node_len _ _ _ Hiso).
+  destruct Hiso as (f & g & Hgf & Hfg & Hdom & Hcod & Hfun & Hconn & Hifc & Hff).
+  assert (HtcP : term_conns P = []) by (apply term_conns_cf; exact HcfP).
+  assert (HtcQ : term_conns Q = []) by (apply term_conns_cf; exact HcfQ).
+  set (ph := phi f P Q Hfun Hconn HtcP HtcQ).
+  assert (Hph_free : forall X, In X (freelinks P) -> ph X = X).
+  { intros X HX.
+    exact (phi_free_id f P Q Hfun Hconn HtcP HtcQ HcfP HcfQ Hifc X HX). }
+  assert (Hph_inj : forall X X', In X (links P) -> In X' (links P) ->
+                    ph X = ph X' -> X = X').
+  { exact (phi_inj f P Q Hfun Hconn HtcP HtcQ HcfP HcfQ). }
+  assert (Hph_nf : forall X, In X (locallinks P) -> ~ In (ph X) (freelinks P)).
+  { intros X HX Hin.
+    assert (HXl : In X (links P)) by (apply In_locallinks_links; exact HX).
+    assert (HphXl : In (ph X) (links P)) by (apply in_freelinks_In_links; exact Hin).
+    assert (Hpp : ph (ph X) = ph X)
+      by exact (phi_free_id f P Q Hfun Hconn HtcP HtcQ HcfP HcfQ Hifc (ph X) Hin).
+    assert (HeqX : ph X = X) by (apply Hph_inj; auto).
+    apply (locallinks_freelinks_disjoint P X);
+      [ exact HX | rewrite <- HeqX; exact Hin ]. }
+  destruct (congm_rename_by P ph WFP Hph_free Hph_inj Hph_nf)
+    as [P2 [Hstep HflatP2]].
+  assert (WFP2 : wellformed_t P2)
+    by exact (proj2 (congm_wellformed_t _ _ Hstep)).
+  apply congm_trans' with P2; [ exact Hstep |].
+  assert (Hperm : Permutation (map (map_atom ph) (flatten_atoms P)) (flatten_atoms Q)).
+  { exact (phi_perm f g P Q Hfun Hconn HtcP HtcQ Hfg Hcod Hdom HcfP HcfQ Hlen). }
+  apply congm_trans' with (make_mol (flatten_atoms P2)); [ apply cong_flatten; exact WFP2 |].
+  rewrite HflatP2.
+  apply congm_trans' with (make_mol (flatten_atoms Q)).
+  - apply make_mol_perm; [ exact Hperm |].
+    rewrite <- HflatP2. apply wellformed_t_flatten_make_mol. exact WFP2.
+  - apply congm_sym'. apply cong_flatten. exact WFQ.
+Qed.
