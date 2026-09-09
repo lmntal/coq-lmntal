@@ -6229,3 +6229,95 @@ Proof.
       apply wellformed_t_link_multiset with (TMol (TAtom (AConn x y)) R2);
         [ intro a; reflexivity | exact Wmid ].
 Qed.
+
+Lemma flat_map_links_conns : forall M,
+  flat_map links_of_atom (conns_as_atoms M) = endpoints M.
+Proof.
+  induction M as [|[x y] M IH]; simpl; [ reflexivity | rewrite IH; reflexivity ].
+Qed.
+
+Lemma links_nf_split : forall M A,
+  links (make_mol (conns_as_atoms M ++ A))
+  = endpoints M ++ flat_map links_of_atom A.
+Proof.
+  intros M A. rewrite links_make_mol, flat_map_app, flat_map_links_conns. reflexivity.
+Qed.
+
+Lemma endpoints_length : forall M,
+  length (endpoints M) = 2 * length M.
+Proof.
+  induction M as [|[x y] M IH]; simpl; [ reflexivity | rewrite IH; lia ].
+Qed.
+
+Lemma mult_nf_notendpoint : forall M A Z,
+  ~ In Z (endpoints M) ->
+  multiplicity (link_multiset (make_mol (conns_as_atoms M ++ A))) Z
+  = multiplicity (link_multiset (make_mol A)) Z.
+Proof.
+  intros M A Z HZ. unfold link_multiset.
+  rewrite links_nf_split, links_make_mol.
+  rewrite !mult_list_count, count_occ_app.
+  rewrite (count_occ_not_In Leq_dec) in HZ. lia.
+Qed.
+
+Lemma matching_endpoints_disjoint_A : forall M A,
+  (forall c, In c M ->
+     In (fst c) (freelinks (make_mol (conns_as_atoms M ++ A))) /\
+     In (snd c) (freelinks (make_mol (conns_as_atoms M ++ A)))) ->
+  NoDup (endpoints M) ->
+  forall Z, In Z (endpoints M) -> ~ In Z (flat_map links_of_atom A).
+Proof.
+  intros M A Hfr Hnd Z HZ HZA.
+  assert (Hm1 : multiplicity (link_multiset (make_mol (conns_as_atoms M ++ A))) Z = 1).
+  { unfold endpoints in HZ. apply in_flat_map in HZ.
+    destruct HZ as [c [Hc Hzc]].
+    destruct (Hfr c Hc) as [H1 H2].
+    apply in_freelinks in H1. apply in_freelinks in H2.
+    destruct Hzc as [<-|[<-|[]]]; assumption. }
+  unfold link_multiset in Hm1. rewrite links_nf_split, mult_list_count in Hm1.
+  rewrite count_occ_app in Hm1.
+  assert (HcM : count_occ Leq_dec (endpoints M) Z >= 1).
+  { apply (count_occ_In Leq_dec). exact HZ. }
+  assert (HcA : count_occ Leq_dec (flat_map links_of_atom A) Z >= 1).
+  { apply (count_occ_In Leq_dec). exact HZA. }
+  lia.
+Qed.
+
+Lemma giso_matching_pairs : forall M1 A1 M2 A2 I,
+  (forall c, In c M1 -> fst c <> snd c /\ In (fst c) I /\ In (snd c) I) ->
+  NoDup (endpoints M2) ->
+  Forall is_aatom A1 -> Forall is_aatom A2 ->
+  (forall Z W, In Z I -> In W I ->
+     (edge_eq (term_conns (make_mol (conns_as_atoms M1 ++ A1))) Z W
+      <-> edge_eq (term_conns (make_mol (conns_as_atoms M2 ++ A2))) Z W)) ->
+  forall a b, In (a,b) M1 -> In (a,b) M2 \/ In (b,a) M2.
+Proof.
+  intros M1 A1 M2 A2 I Hfr Hnd2 HA1 HA2 Hff a b Hab.
+  destruct (Hfr (a,b) Hab) as [Hne [Ha Hb]]. simpl in Hne, Ha, Hb.
+  assert (E1 : edge_eq (term_conns (make_mol (conns_as_atoms M1 ++ A1))) a b).
+  { rewrite term_conns_nf by exact HA1. apply edge_eq_step. exact Hab. }
+  assert (E2 : edge_eq (term_conns (make_mol (conns_as_atoms M2 ++ A2))) a b)
+    by (apply (Hff a b Ha Hb); exact E1).
+  rewrite term_conns_nf in E2 by exact HA2.
+  apply (edge_eq_matching M2 a b Hnd2 Hne) in E2. exact E2.
+Qed.
+
+Lemma matching_same_len : forall M1 M2,
+  NoDup (endpoints M1) -> NoDup (endpoints M2) ->
+  (forall a b, In (a,b) M1 -> In (a,b) M2 \/ In (b,a) M2) ->
+  (forall a b, In (a,b) M2 -> In (a,b) M1 \/ In (b,a) M1) ->
+  length M1 = length M2.
+Proof.
+  intros M1 M2 Hnd1 Hnd2 H12 H21.
+  assert (mk : forall (Ma Mb : list (Link*Link)),
+             (forall a b, In (a,b) Ma -> In (a,b) Mb \/ In (b,a) Mb) ->
+             incl (endpoints Ma) (endpoints Mb)).
+  { intros Ma Mb H Z HZ. unfold endpoints in HZ |- *.
+    apply in_flat_map in HZ. destruct HZ as [[a b] [Hab Hz]].
+    destruct (H a b Hab) as [K|K]; apply in_flat_map;
+      [ exists (a,b) | exists (b,a) ]; (split; [ exact K |]);
+      simpl in Hz |- *; tauto. }
+  assert (Hlen : length (endpoints M1) = length (endpoints M2)).
+  { apply PeanoNat.Nat.le_antisymm; apply NoDup_incl_length; auto. }
+  rewrite !endpoints_length in Hlen. lia.
+Qed.
