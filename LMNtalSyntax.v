@@ -6085,3 +6085,147 @@ Proof.
       [ contradiction | exact D ].
   - intros [K|K]; [ apply edge_eq_step | apply edge_eq_step' ]; exact K.
 Qed.
+
+Lemma congm_cong_r : forall P Q Q',
+  wellformed_t (TMol P Q) -> wellformed_t (TMol P Q') ->
+  Q ==m Q' -> TMol P Q ==m TMol P Q'.
+Proof.
+  intros P Q Q' W W' H.
+  assert (WQP : wellformed_t (TMol Q P)).
+  { apply wellformed_t_link_multiset with (TMol P Q); [ | exact W ].
+    intro a. rewrite !multiplicity_mol. lia. }
+  assert (WQ'P : wellformed_t (TMol Q' P)).
+  { apply wellformed_t_link_multiset with (TMol P Q'); [ | exact W' ].
+    intro a. rewrite !multiplicity_mol. lia. }
+  apply congm_trans' with (TMol Q P); [ apply congm_E2; exact W |].
+  apply congm_trans' with (TMol Q' P); [ | apply congm_E2; exact WQ'P ].
+  apply congm_E5; [ exact WQP | exact WQ'P | exact H ].
+Qed.
+
+Lemma endpoints_app : forall c1 c2,
+  endpoints (c1 ++ c2) = endpoints c1 ++ endpoints c2.
+Proof. intros. unfold endpoints. apply flat_map_app. Qed.
+
+Lemma endpoints_cons : forall x y c,
+  endpoints ((x,y) :: c) = x :: y :: endpoints c.
+Proof. reflexivity. Qed.
+
+Lemma NoDup_endpoints_mid : forall L1 x y L2,
+  NoDup (endpoints (L1 ++ (x,y) :: L2)) ->
+  NoDup (endpoints (L1 ++ L2)).
+Proof.
+  intros L1 x y L2 H.
+  rewrite endpoints_app, endpoints_cons in H.
+  rewrite endpoints_app.
+  apply NoDup_remove_1 in H.
+  apply NoDup_remove_1 in H.
+  exact H.
+Qed.
+
+Lemma NoDup_endpoints_mid' : forall L1 c L2,
+  NoDup (endpoints (L1 ++ c :: L2)) -> NoDup (endpoints (L1 ++ L2)).
+Proof. intros L1 [x y] L2. apply NoDup_endpoints_mid. Qed.
+
+Lemma matching_reorder : forall M1 M2 A,
+  NoDup (endpoints M1) -> NoDup (endpoints M2) ->
+  length M1 = length M2 ->
+  (forall x y, In (x,y) M1 -> In (x,y) M2 \/ In (y,x) M2) ->
+  wellformed_t (make_mol (conns_as_atoms M1 ++ A)) ->
+  wellformed_t (make_mol (conns_as_atoms M2 ++ A)) ->
+  make_mol (conns_as_atoms M1 ++ A) ==m make_mol (conns_as_atoms M2 ++ A).
+Proof.
+  induction M1 as [|[x y] M1 IH]; intros M2 A Hnd1 Hnd2 Hlen Hpair WF1 WF2.
+  - destruct M2 as [|c M2];
+      [ apply congm_refl; exact WF1 | simpl in Hlen; discriminate ].
+  - assert (Hxy : In (x,y) M2 \/ In (y,x) M2) by (apply Hpair; left; reflexivity).
+    rewrite endpoints_cons in Hnd1.
+    rewrite NoDup_cons_iff in Hnd1. destruct Hnd1 as [Hxnin Hnd1].
+    rewrite NoDup_cons_iff in Hnd1. destruct Hnd1 as [Hynin Hnd1M].
+    assert (Hxne : x <> y) by (intro E; subst y; apply Hxnin; left; reflexivity).
+    assert (WFleft : wellformed_t (TMol (TAtom (AConn x y))
+                       (make_mol (conns_as_atoms M1 ++ A)))).
+    { change (TMol (TAtom (AConn x y)) (make_mol (conns_as_atoms M1 ++ A)))
+        with (make_mol (AConn x y :: conns_as_atoms M1 ++ A)).
+      change (AConn x y :: conns_as_atoms M1 ++ A)
+        with (conns_as_atoms ((x,y)::M1) ++ A). exact WF1. }
+    assert (WFR1 : wellformed_t (make_mol (conns_as_atoms M1 ++ A)))
+      by (apply wellformed_t_inj in WFleft; tauto).
+    assert (Hsplit : exists L1 L2 (flip:bool),
+              M2 = L1 ++ (if flip then (y,x) else (x,y)) :: L2).
+    { destruct Hxy as [Hin|Hin]; apply in_split in Hin;
+        destruct Hin as [L1 [L2 HM2]];
+        [ exists L1, L2, false | exists L1, L2, true ]; exact HM2. }
+    destruct Hsplit as [L1 [L2 [flip HM2]]].
+    set (c0 := if flip then (y,x) else (x,y)) in *.
+    assert (HM2c : M2 = L1 ++ c0 :: L2) by exact HM2. clear HM2. rename HM2c into HM2.
+    assert (Hc0x : fst c0 = (if flip then y else x)) by (destruct flip; reflexivity).
+    assert (Hc0y : snd c0 = (if flip then x else y)) by (destruct flip; reflexivity).
+    assert (HpermM2 : Permutation M2 (c0 :: (L1 ++ L2))).
+    { rewrite HM2. apply Permutation_sym. apply Permutation_middle. }
+    assert (HpermA : Permutation (conns_as_atoms M2 ++ A)
+                     (AConn (fst c0) (snd c0) :: conns_as_atoms (L1 ++ L2) ++ A)).
+    { change (AConn (fst c0) (snd c0) :: conns_as_atoms (L1 ++ L2) ++ A)
+        with ((AConn (fst c0) (snd c0) :: conns_as_atoms (L1 ++ L2)) ++ A).
+      apply Permutation_app_tail.
+      change (AConn (fst c0) (snd c0) :: conns_as_atoms (L1 ++ L2))
+        with (conns_as_atoms (c0 :: L1 ++ L2)).
+      apply Permutation_map. exact HpermM2. }
+    set (R2 := make_mol (conns_as_atoms (L1 ++ L2) ++ A)) in *.
+    assert (HM2eq : make_mol (conns_as_atoms M2 ++ A)
+              ==m TMol (TAtom (AConn (fst c0) (snd c0))) R2).
+    { unfold R2.
+      change (TMol (TAtom (AConn (fst c0) (snd c0)))
+                   (make_mol (conns_as_atoms (L1 ++ L2) ++ A)))
+        with (make_mol (AConn (fst c0) (snd c0) :: conns_as_atoms (L1 ++ L2) ++ A)).
+      apply make_mol_perm; [ exact HpermA | exact WF2 ]. }
+    assert (WFm : wellformed_t (TMol (TAtom (AConn (fst c0) (snd c0))) R2))
+      by exact (proj2 (congm_wellformed_t _ _ HM2eq)).
+    assert (WFR2 : wellformed_t R2) by (apply wellformed_t_inj in WFm; tauto).
+    assert (Wmid : wellformed_t (TMol (TAtom (AConn x y)) R2)).
+    { apply wellformed_t_link_multiset with (TMol (TAtom (AConn (fst c0) (snd c0))) R2);
+        [ | exact WFm ].
+      intro a. rewrite !multiplicity_mol, !multiplicity_TAtom_AConn.
+      rewrite Hc0x, Hc0y. destruct flip; lia. }
+    assert (Hnd2' : NoDup (endpoints (L1 ++ L2))).
+    { eapply NoDup_endpoints_mid'. rewrite <- HM2. exact Hnd2. }
+    assert (Hlen' : length M1 = length (L1 ++ L2)).
+    { assert (length M2 = S (length (L1 ++ L2)))
+        by (rewrite HM2, !length_app; simpl; lia).
+      simpl in Hlen. lia. }
+    assert (Hpair' : forall a b, In (a,b) M1 ->
+                     In (a,b) (L1 ++ L2) \/ In (b,a) (L1 ++ L2)).
+    { intros a b Hab.
+      assert (Hne1 : (a,b) <> (x,y)).
+      { intro E. injection E as -> ->. apply Hxnin. right.
+        exact (In_endpoints_l M1 x y Hab). }
+      assert (Hne2 : (a,b) <> (y,x)).
+      { intro E. injection E as -> ->. apply Hxnin. right.
+        exact (In_endpoints_r M1 y x Hab). }
+      assert (Hin2 : In (a,b) M2 \/ In (b,a) M2)
+        by (apply Hpair; right; exact Hab).
+      rewrite HM2 in Hin2.
+      destruct Hin2 as [K|K]; apply in_app_or in K; destruct K as [K|[K|K]].
+      - left. apply in_or_app. left. exact K.
+      - exfalso. unfold c0 in K. destruct flip;
+          [ apply Hne2 | apply Hne1 ]; congruence.
+      - left. apply in_or_app. right. exact K.
+      - right. apply in_or_app. left. exact K.
+      - exfalso. unfold c0 in K. destruct flip;
+          [ apply Hne1 | apply Hne2 ]; congruence.
+      - right. apply in_or_app. right. exact K. }
+    assert (Hrec : make_mol (conns_as_atoms M1 ++ A) ==m R2)
+      by exact (IH (L1 ++ L2) A Hnd1M Hnd2' Hlen' Hpair' WFR1 WFR2).
+    change (conns_as_atoms ((x,y)::M1) ++ A)
+      with (AConn x y :: (conns_as_atoms M1 ++ A)).
+    change (make_mol (AConn x y :: (conns_as_atoms M1 ++ A)))
+      with (TMol (TAtom (AConn x y)) (make_mol (conns_as_atoms M1 ++ A))).
+    apply congm_trans' with (TMol (TAtom (AConn (fst c0) (snd c0))) R2).
+    2:{ apply congm_sym'. exact HM2eq. }
+    apply congm_trans' with (TMol (TAtom (AConn x y)) R2).
+    { apply congm_cong_r; [ exact WFleft | exact Wmid | exact Hrec ]. }
+    destruct flip.
+    + rewrite Hc0x, Hc0y. apply congm_conn_sym. exact Wmid.
+    + rewrite Hc0x, Hc0y. apply congm_refl.
+      apply wellformed_t_link_multiset with (TMol (TAtom (AConn x y)) R2);
+        [ intro a; reflexivity | exact Wmid ].
+Qed.
