@@ -5610,3 +5610,57 @@ Proof.
     rewrite <- HflatP2. apply wellformed_t_flatten_make_mol. exact WFP2.
   - apply congm_sym'. apply cong_flatten. exact WFQ.
 Qed.
+
+(* Reverse direction for closed terms: giso [] P Q -> P ==m Q.
+   Reduce both sides to their connector-free normal forms (normalize_cong,
+   valid because closed), transport the iso along congm_giso, then apply the
+   connector-free reverse direction. *)
+Theorem giso_closed_congm : forall P Q,
+  wellformed_t P -> wellformed_t Q -> Closed P -> Closed Q ->
+  giso [] P Q -> P ==m Q.
+Proof.
+  intros P Q WFP WFQ HCP HCQ Hiso.
+  assert (HPn : P ==m normalize P) by (apply normalize_cong; assumption).
+  assert (HQn : Q ==m normalize Q) by (apply normalize_cong; assumption).
+  assert (WFPn : wellformed_t (normalize P))
+    by exact (proj2 (congm_wellformed_t _ _ HPn)).
+  assert (WFQn : wellformed_t (normalize Q))
+    by exact (proj2 (congm_wellformed_t _ _ HQn)).
+  assert (HCPn : Closed (normalize P))
+    by (apply (proj1 (congm_Closed _ _ HPn)); exact HCP).
+  assert (HisoP : giso [] P (normalize P)).
+  { assert (H := congm_giso _ _ HPn). rewrite HCP in H. exact H. }
+  assert (HisoQ : giso [] Q (normalize Q)).
+  { assert (H := congm_giso _ _ HQn). rewrite HCQ in H. exact H. }
+  assert (Hn : giso [] (normalize P) (normalize Q)).
+  { apply giso_trans with P; [ apply giso_sym; exact HisoP |].
+    apply giso_trans with Q; [ exact Hiso | exact HisoQ ]. }
+  assert (HcfP : connector_free (normalize P)) by apply normalize_connector_free.
+  assert (HcfQ : connector_free (normalize Q)) by apply normalize_connector_free.
+  assert (Hcf : giso (freelinks (normalize P)) (normalize P) (normalize Q))
+    by (rewrite HCPn; exact Hn).
+  assert (Hmid := giso_cf_congm _ _ WFPn WFQn HcfP HcfQ Hcf).
+  apply congm_trans' with (normalize P); [ exact HPn |].
+  apply congm_trans' with (normalize Q); [ exact Hmid |].
+  apply congm_sym'. exact HQn.
+Qed.
+
+(* The closed-term correspondence (design note's Theorem 3 / Corollary 1):
+   for closed wellformed terms, structural congruence coincides with
+   interface-free graph isomorphism. *)
+Theorem congm_closed_giso_iff : forall P Q,
+  wellformed_t P -> wellformed_t Q -> Closed P -> Closed Q ->
+  (P ==m Q <-> giso [] P Q).
+Proof.
+  intros P Q WFP WFQ HCP HCQ. split.
+  - intros H. assert (G := congm_giso _ _ H). rewrite HCP in G. exact G.
+  - apply giso_closed_congm; assumption.
+Qed.
+
+Corollary cong_closed_giso_iff : forall P Q,
+  wellformed_t P -> wellformed_t Q -> Closed P -> Closed Q ->
+  (P == Q <-> giso [] P Q).
+Proof.
+  intros P Q WFP WFQ HCP HCQ.
+  rewrite congm_cong_iff. apply congm_closed_giso_iff; assumption.
+Qed.
