@@ -2151,27 +2151,9 @@ Qed.
 
 (* For SC-GI Correspondence *)
 
-(* Record AtomOcc := {
-  occ_name : string;
-  occ_links : list Link;
-}.
-Inductive AtomOcc :=
-  | OccAtom (name:string) (links:list Link)
-  | OccConn (X Y:Link).
-
-Record PortGraph := {
-  pg_atoms : list AtomOcc;
-}. *)
-
 Definition AtomOcc := Atom.
 Definition OccId := nat.
 Definition PortGraph := list (OccId * AtomOcc).
-
-(* 
-Definition OccId := nat.
-Definition AtomOcc := (OccId * Atom).
-Definition PortGraph := list AtomOcc.
- *)
 
 Fixpoint flatten_atoms t :=
   match t with
@@ -2478,15 +2460,6 @@ Proof.
   - simpl.
     rewrite atom_of_map_graph_None; auto.
 Qed.
-
-(* Definition link_occurs (G : PortGraph) (X : Link) : nat :=
-  multiplicity (list_to_multiset (links_pg G)) X.
-
-Definition free_link (G : PortGraph) (X : Link) : Prop :=
-  link_occurs G X = 1.
-
-Definition local_link (G : PortGraph) (X : Link) : Prop :=
-  link_occurs G X = 2. *)
 
 Definition conn_step (G : PortGraph) (X Y : Link) : Prop :=
   exists i,
