@@ -6767,3 +6767,118 @@ Proof.
   intros P Q WFP WFQ Hfree.
   rewrite congm_cong_iff. apply congm_giso_iff; assumption.
 Qed.
+
+(* ------------------------------------------------------------------ *)
+(*  The "same free links" hypothesis in [giso_congm]/[congm_giso_iff]  *)
+(*  is NOT redundant: it cannot be derived from [giso (freelinks P) P  *)
+(*  Q] (plus well-formedness of both sides) alone.  [giso] only sees a  *)
+(*  term through its ordinary atoms ([node_atoms]) and the connector-  *)
+(*  generated equivalence [edge_eq]; it has no way to notice that a     *)
+(*  link the interface fixes has picked up an *extra* connector on the *)
+(*  other side, since [edge_eq c X X] holds trivially regardless of c.  *)
+(*  Concretely: P := a(X) (X free); Q := {{X=W, a(X)}} (X local -- it   *)
+(*  occurs both in the atom and in the connector -- and W free).  Then  *)
+(*  [giso (freelinks P) P Q] holds (there is nothing for the giso       *)
+(*  clauses to catch: W lies outside the interface [X], and X=X is a    *)
+(*  trivial edge_eq fact on both sides), both terms are well-formed,    *)
+(*  yet freelinks P = [X] <> [W] = freelinks Q.  (Consistently, P and Q *)
+(*  are not ==m: {{X=W,a(X)}} ==m a(W) <> a(X) by (E9).)                *)
+(* ------------------------------------------------------------------ *)
+
+Section FreelinksHypNecessary.
+
+Definition freelinks_hyp_ce_P : Term := TAtom (AAtom "a" ["X"]).
+Definition freelinks_hyp_ce_Q : Term :=
+  TMol (TAtom (AConn "X" "W")) (TAtom (AAtom "a" ["X"])).
+
+Lemma freelinks_hyp_ce_wf_P : wellformed_t freelinks_hyp_ce_P.
+Proof. reflexivity. Qed.
+
+Lemma freelinks_hyp_ce_wf_Q : wellformed_t freelinks_hyp_ce_Q.
+Proof. reflexivity. Qed.
+
+Lemma freelinks_hyp_ce_freelinks_P : freelinks freelinks_hyp_ce_P = ["X"].
+Proof. reflexivity. Qed.
+
+Lemma freelinks_hyp_ce_freelinks_Q : freelinks freelinks_hyp_ce_Q = ["W"].
+Proof. reflexivity. Qed.
+
+Lemma freelinks_hyp_ce_node_atoms_P :
+  node_atoms freelinks_hyp_ce_P = [AAtom "a" ["X"]].
+Proof. reflexivity. Qed.
+
+Lemma freelinks_hyp_ce_node_atoms_Q :
+  node_atoms freelinks_hyp_ce_Q = [AAtom "a" ["X"]].
+Proof. reflexivity. Qed.
+
+Lemma freelinks_hyp_ce_portlink_P : forall i k X0,
+  portlink (node_atoms freelinks_hyp_ce_P) i k = Some X0 ->
+  i = 0 /\ k = 0 /\ X0 = "X".
+Proof.
+  intros i k X0 H. unfold portlink in H.
+  rewrite freelinks_hyp_ce_node_atoms_P in H.
+  destruct i as [|i]; simpl in H; [| rewrite nth_error_nil in H; discriminate].
+  destruct k as [|k]; simpl in H; [| rewrite nth_error_nil in H; discriminate].
+  inversion H. auto.
+Qed.
+
+Lemma freelinks_hyp_ce_portlink_Q : forall i k X0,
+  portlink (node_atoms freelinks_hyp_ce_Q) i k = Some X0 ->
+  i = 0 /\ k = 0 /\ X0 = "X".
+Proof.
+  intros i k X0 H. unfold portlink in H.
+  rewrite freelinks_hyp_ce_node_atoms_Q in H.
+  destruct i as [|i]; simpl in H; [| rewrite nth_error_nil in H; discriminate].
+  destruct k as [|k]; simpl in H; [| rewrite nth_error_nil in H; discriminate].
+  inversion H. auto.
+Qed.
+
+Lemma freelinks_hyp_ce_giso :
+  giso (freelinks freelinks_hyp_ce_P) freelinks_hyp_ce_P freelinks_hyp_ce_Q.
+Proof.
+  exists (fun i => i), (fun i => i).
+  split; [ reflexivity |].
+  split; [ reflexivity |].
+  split; [ rewrite freelinks_hyp_ce_node_atoms_P, freelinks_hyp_ce_node_atoms_Q;
+           simpl; lia |].
+  split; [ rewrite freelinks_hyp_ce_node_atoms_P, freelinks_hyp_ce_node_atoms_Q;
+           simpl; lia |].
+  split.
+  { intros i. rewrite freelinks_hyp_ce_node_atoms_P, freelinks_hyp_ce_node_atoms_Q.
+    reflexivity. }
+  split.
+  { intros i k j l Xik Xjl Yik Yjl H1 H2 H3 H4.
+    apply freelinks_hyp_ce_portlink_P in H1. apply freelinks_hyp_ce_portlink_P in H2.
+    apply freelinks_hyp_ce_portlink_Q in H3. apply freelinks_hyp_ce_portlink_Q in H4.
+    destruct H1 as [_ [_ ->]]. destruct H2 as [_ [_ ->]].
+    destruct H3 as [_ [_ ->]]. destruct H4 as [_ [_ ->]].
+    split; intros _; apply edge_eq_refl. }
+  split.
+  { intros i k Z Xik Yik HZ H1 H2.
+    apply freelinks_hyp_ce_portlink_P in H1. apply freelinks_hyp_ce_portlink_Q in H2.
+    destruct H1 as [_ [_ ->]]. destruct H2 as [_ [_ ->]].
+    rewrite freelinks_hyp_ce_freelinks_P in HZ. simpl in HZ. destruct HZ as [<-|[]].
+    split; intros _; apply edge_eq_refl. }
+  { intros Z W HZ HW.
+    rewrite freelinks_hyp_ce_freelinks_P in HZ, HW. simpl in HZ, HW.
+    destruct HZ as [<-|[]]. destruct HW as [<-|[]].
+    split; intros _; apply edge_eq_refl. }
+Qed.
+
+Theorem freelinks_hyp_not_derivable_from_giso :
+  exists P Q,
+    wellformed_t P /\ wellformed_t Q /\
+    giso (freelinks P) P Q /\
+    ~ (forall X, In X (freelinks P) <-> In X (freelinks Q)).
+Proof.
+  exists freelinks_hyp_ce_P, freelinks_hyp_ce_Q.
+  split; [ exact freelinks_hyp_ce_wf_P |].
+  split; [ exact freelinks_hyp_ce_wf_Q |].
+  split; [ exact freelinks_hyp_ce_giso |].
+  intro H. specialize (H "X"). destruct H as [H _].
+  rewrite freelinks_hyp_ce_freelinks_Q in H.
+  assert (Hin : In "X" ["W"]) by (apply H; rewrite freelinks_hyp_ce_freelinks_P; left; reflexivity).
+  simpl in Hin. destruct Hin as [C|[]]. discriminate C.
+Qed.
+
+End FreelinksHypNecessary.
