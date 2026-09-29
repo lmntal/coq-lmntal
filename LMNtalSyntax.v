@@ -5,6 +5,7 @@ Import ListNotations.
 Open Scope list_scope.
 
 Require Import Multiset.
+Require Import Lia.
 
 Require Import Stdlib.Logic.Eqdep_dec.
 Require Import Stdlib.Logic.ClassicalDescription.
@@ -200,31 +201,154 @@ Example substitute_example :
   {{ ( "p"("X", "Y"), "q"("Y", "X") ) [ "L" / "X" ] }} = {{ "p"("L", "Y"), "q"("Y", "L") }}.
 Proof. reflexivity. Qed.
 
-Reserved Notation "p == q" (at level 40).
-Inductive cong : Term -> Term -> Prop :=
-  | cong_E1 : forall P, wellformed_t P ->
-              {{TZero, P}} == P
-  | cong_E2 : forall P Q, wellformed_t {{P, Q}} -> 
-              {{P, Q}} == {{Q, P}}
-  | cong_E3 : forall P Q R, wellformed_t {{P, (Q, R)}} -> 
-              {{P, (Q, R)}} == {{(P, Q), R}}
-  | cong_E4 : forall P X Y, wellformed_t P -> wellformed_t {{ P[Y/X] }} ->
-              In X (locallinks P) -> P == {{ P[Y/X] }}
-  | cong_E5 : forall P P' Q, wellformed_t {{ P,Q }} -> wellformed_t {{ P',Q }} ->
-              P == P' -> {{ P,Q }} == {{ P',Q }}
-  | cong_E7 : forall X, {{ X = X }} == TZero
-  | cong_E8 : forall X Y, {{ X = Y }} == {{ Y = X }}
-  | cong_E9 : forall X Y (A:Atom),
-              wellformed_t {{ X = Y, A }} -> wellformed_t {{ A[Y/X] }} ->
-              In X (freelinks A) ->
-              {{ X = Y, A }} == {{ A[Y/X] }}
-  | cong_refl : forall P, wellformed_t P ->
-                  P == P
-  | cong_trans : forall P Q R, wellformed_t P -> wellformed_t Q -> wellformed_t R ->
-                  P == Q -> Q == R -> P == R
-  | cong_sym : forall P Q, wellformed_t P -> wellformed_t Q -> 
-                  P == Q -> Q == P
-  where "p '==' q" := (cong p q).
+(* ------------------------------------------------------------------ *)
+(*  A modular presentation of structural congruence (cf. Fig. 4 of the  *)
+(*  design note): the base rewrite rules (E1)-(E3),(E7),(E9) live in    *)
+(*  [congm_step]; the two admissible rules (E4),(E8) live separately in *)
+(*  [cong_extra]; both [cong] (==) and [congm] (==m, defined further    *)
+(*  below) are obtained by applying the SAME generic closure operator   *)
+(*  [cclose] to a step relation.  [cclose] adds reflexivity, symmetry,  *)
+(*  transitivity, and the (E5) molecule-congruence rule -- each of      *)
+(*  these four (and (E1)-(E3),(E7),(E9)) is guarded by well-formedness  *)
+(*  of both sides, exactly as in the informal rules, and exactly once.  *)
+(*  The individual named rules ([cong_E1] .. [cong_sym]; [congm_E1] ..  *)
+(*  [congm_sym]) are recovered as short lemmas below, so every site     *)
+(*  that used to [apply cong_E4] (etc.) is unaffected by this           *)
+(*  refactoring.                                                        *)
+(* ------------------------------------------------------------------ *)
+
+Inductive congm_step : Term -> Term -> Prop :=
+  | ms_E1 : forall P, congm_step {{ TZero, P }} P
+  | ms_E2 : forall P Q, congm_step {{ P, Q }} {{ Q, P }}
+  | ms_E3 : forall P Q R, congm_step {{ P, (Q, R) }} {{ (P, Q), R }}
+  | ms_E7 : forall X, congm_step {{ X = X }} TZero
+  | ms_E9 : forall X Y (A:Atom),
+              In X (freelinks A) -> congm_step {{ X = Y, A }} {{ A[Y/X] }}.
+
+Inductive cong_extra : Term -> Term -> Prop :=
+  | es_E4 : forall P X Y, In X (locallinks P) -> cong_extra P {{ P[Y/X] }}
+  | es_E8 : forall X Y, cong_extra {{ X = Y }} {{ Y = X }}.
+
+Inductive cclose (step : Term -> Term -> Prop) : Term -> Term -> Prop :=
+  | cc_step  : forall P Q,
+                 wellformed_t P -> wellformed_t Q -> step P Q -> cclose step P Q
+  | cc_ctxt  : forall P P' Q, wellformed_t {{ P,Q }} -> wellformed_t {{ P',Q }} ->
+                 cclose step P P' -> cclose step {{ P,Q }} {{ P',Q }}
+  | cc_refl  : forall P, wellformed_t P -> cclose step P P
+  | cc_trans : forall P Q R, cclose step P Q -> cclose step Q R -> cclose step P R
+  | cc_sym   : forall P Q, cclose step P Q -> cclose step Q P.
+
+Lemma cclose_mono : forall (s1 s2 : Term -> Term -> Prop),
+  (forall P Q, s1 P Q -> s2 P Q) ->
+  forall P Q, cclose s1 P Q -> cclose s2 P Q.
+Proof.
+  intros s1 s2 Hs P Q H. induction H.
+  - apply cc_step; auto.
+  - apply cc_ctxt; auto.
+  - apply cc_refl; auto.
+  - apply cc_trans with Q; auto.
+  - apply cc_sym; auto.
+Qed.
+
+(* A handful of self-contained well-formedness facts, proved directly
+   from [links]/[list_to_multiset] (available this early in the file),
+   just enough to recover the individual step rules below without
+   depending on the general well-formedness lemmas proved later. *)
+
+Lemma mult_cons : forall a l x,
+  multiplicity (list_to_multiset (a :: l)) x
+  = (if Leq_dec a x then 1 else 0) + multiplicity (list_to_multiset l) x.
+Proof. reflexivity. Qed.
+
+Lemma mult_app : forall l1 l2 x,
+  multiplicity (list_to_multiset (l1 ++ l2)) x
+  = multiplicity (list_to_multiset l1) x + multiplicity (list_to_multiset l2) x.
+Proof.
+  induction l1 as [|a l1 IH]; intros l2 x.
+  - reflexivity.
+  - simpl app. rewrite !mult_cons, IH. destruct (Leq_dec a x); lia.
+Qed.
+
+Lemma wf_TZero : wellformed_t TZero.
+Proof. reflexivity. Qed.
+
+Lemma wf_mol_TZero_l : forall P, wellformed_t P -> wellformed_t {{ TZero, P }}.
+Proof. intros P H. exact H. Qed.
+
+Lemma wf_mol_comm : forall P Q, wellformed_t {{P,Q}} -> wellformed_t {{Q,P}}.
+Proof.
+  intros P Q H. rewrite wellformed_t_forall in *. intros x Hx.
+  assert (Hx' : In x (links {{P,Q}}))
+    by (simpl in Hx |- *; apply in_app_or in Hx; apply in_or_app; tauto).
+  specialize (H x Hx'). unfold link_multiset in H |- *. simpl links.
+  simpl links in H. rewrite mult_app in H |- *. lia.
+Qed.
+
+Lemma wf_mol_assoc : forall P Q R, wellformed_t {{P,(Q,R)}} -> wellformed_t {{(P,Q),R}}.
+Proof.
+  intros P Q R H. rewrite wellformed_t_forall in *. intros x Hx.
+  assert (Hx' : In x (links {{P,(Q,R)}}))
+    by (simpl in Hx |- *; rewrite <- app_assoc in Hx; exact Hx).
+  specialize (H x Hx'). unfold link_multiset in H |- *. simpl links.
+  simpl links in H. rewrite <- app_assoc. exact H.
+Qed.
+
+Lemma wf_selfconn : forall X, wellformed_t (TAtom (AConn X X)).
+Proof.
+  intros X. rewrite wellformed_t_forall. intros x Hx.
+  simpl in Hx. destruct Hx as [E|[E|[]]]; subst x;
+    (unfold link_multiset; simpl links; rewrite !mult_cons, Leq_dec_refl; simpl; lia).
+Qed.
+
+Lemma wf_conn : forall X Y, wellformed_t (TAtom (AConn X Y)).
+Proof.
+  intros X Y. rewrite wellformed_t_forall. intros x Hx.
+  unfold link_multiset. simpl links. rewrite !mult_cons.
+  destruct (Leq_dec X x); destruct (Leq_dec Y x); simpl; lia.
+Qed.
+
+Definition cong (P Q : Term) : Prop :=
+  cclose (fun P Q => congm_step P Q \/ cong_extra P Q) P Q.
+Notation "p == q" := (cong p q) (at level 40).
+
+Lemma cong_E1 : forall P, wellformed_t P -> {{TZero, P}} == P.
+Proof. intros P H. apply cc_step; [ apply wf_mol_TZero_l | | left; apply ms_E1 ]; auto. Qed.
+
+Lemma cong_E2 : forall P Q, wellformed_t {{P, Q}} -> {{P, Q}} == {{Q, P}}.
+Proof. intros P Q H. apply cc_step; [ | apply wf_mol_comm | left; apply ms_E2 ]; auto. Qed.
+
+Lemma cong_E3 : forall P Q R, wellformed_t {{P, (Q, R)}} -> {{P, (Q, R)}} == {{(P, Q), R}}.
+Proof. intros P Q R H. apply cc_step; [ | apply wf_mol_assoc | left; apply ms_E3 ]; auto. Qed.
+
+Lemma cong_E4 : forall P X Y, wellformed_t P -> wellformed_t {{ P[Y/X] }} ->
+                In X (locallinks P) -> P == {{ P[Y/X] }}.
+Proof. intros P X Y H1 H2 H3. apply cc_step; auto. right. apply es_E4; auto. Qed.
+
+Lemma cong_E5 : forall P P' Q, wellformed_t {{ P,Q }} -> wellformed_t {{ P',Q }} ->
+                P == P' -> {{ P,Q }} == {{ P',Q }}.
+Proof. intros P P' Q H1 H2 H3. apply cc_ctxt; auto. Qed.
+
+Lemma cong_E7 : forall X, {{ X = X }} == TZero.
+Proof. intros X. apply cc_step; [ apply wf_selfconn | apply wf_TZero | left; apply ms_E7 ]. Qed.
+
+Lemma cong_E8 : forall X Y, {{ X = Y }} == {{ Y = X }}.
+Proof. intros X Y. apply cc_step; [ apply wf_conn | apply wf_conn | right; apply es_E8 ]. Qed.
+
+Lemma cong_E9 : forall X Y (A:Atom),
+                wellformed_t {{ X = Y, A }} -> wellformed_t {{ A[Y/X] }} ->
+                In X (freelinks A) -> {{ X = Y, A }} == {{ A[Y/X] }}.
+Proof. intros X Y A H1 H2 H3. apply cc_step; auto. left. apply ms_E9; auto. Qed.
+
+Lemma cong_refl : forall P, wellformed_t P -> P == P.
+Proof. intros P H. apply cc_refl; auto. Qed.
+
+Lemma cong_trans : forall P Q R, wellformed_t P -> wellformed_t Q -> wellformed_t R ->
+                P == Q -> Q == R -> P == R.
+Proof. intros P Q R _ _ _ H1 H2. apply cc_trans with Q; auto. Qed.
+
+Lemma cong_sym : forall P Q, wellformed_t P -> wellformed_t Q ->
+                P == Q -> Q == P.
+Proof. intros P Q _ _ H. apply cc_sym; auto. Qed.
 
 Example cong_example : {{ "p"("X","X") }} == {{ "p"("Y","Y") }}.
 Proof.
@@ -573,16 +697,17 @@ Lemma cong_wellformed_t :
   forall P Q, P == Q -> wellformed_t P /\ wellformed_t Q.
 Proof.
   intros P Q H.
-  induction H; auto; split; auto.
-  - apply wellformed_t_link_multiset with {{P,Q}}; auto.
-    apply link_multiset_swap.
-  - apply wellformed_t_link_multiset with {{P,(Q,R)}}; auto.
-    apply link_multiset_assoc.
-  - apply connector_wellformed_t.
-  - unfold wellformed_t.
-    simpl. auto.
-  - apply connector_wellformed_t.
-  - apply connector_wellformed_t.
+  induction H as
+    [ P Q HwP HwQ Hstep
+    | P P' Q Hw1 Hw2 H IH
+    | P Hw
+    | P Q R H1 IH1 H2 IH2
+    | P Q H IH ].
+  - split; assumption.
+  - split; assumption.
+  - split; assumption.
+  - destruct IH1 as [HP HQ]. destruct IH2 as [_ HR]. split; assumption.
+  - destruct IH as [HP HQ]. split; assumption.
 Qed.
 
 Lemma rrel_wellformed :
@@ -1964,18 +2089,30 @@ Theorem congm_cong_iff :
 Proof.
   intros P Q.
   split.
-  - intros H. induction H.
-    + apply congm_E1; auto.
-    + apply congm_E2; auto.
-    + apply congm_E3; auto.
-    + apply congm_E4; auto.
-    + apply congm_E5; auto.
-    + apply congm_E7; auto.
-    + apply congm_E8; auto.
-    + apply congm_E9; auto.
-    + apply congm_refl; auto.
-    + apply congm_trans with Q; auto.
-    + apply congm_sym; auto.
+  - intros H. induction H as
+      [ P Q HwP HwQ Hstep
+      | P P' Q Hw1 Hw2 H IH
+      | P Hw
+      | P Q R H1 IH1 H2 IH2
+      | P Q H IH ].
+    { destruct Hstep as [Hs | He].
+      { destruct Hs as [ P0 | P0 Q0 | P0 Q0 R0 | X0 | X0 Y0 A0 Hfr ].
+        { apply congm_E1; auto. }
+        { apply congm_E2; auto. }
+        { apply congm_E3; auto. }
+        { apply congm_E7; auto. }
+        { apply congm_E9; auto. } }
+      (* (E4),(E8) are admissible in congm *)
+      { destruct He as [ P0 X0 Y0 Hloc | X0 Y0 ].
+        { apply congm_E4; auto. }
+        { apply congm_E8. } } }
+    { apply congm_E5; auto. }
+    { apply congm_refl; auto. }
+    { destruct (cong_wellformed_t _ _ H1) as [HwfP HwfQ].
+      destruct (cong_wellformed_t _ _ H2) as [_ HwfR].
+      apply congm_trans with Q; auto. }
+    { destruct (cong_wellformed_t _ _ H) as [HwfP HwfQ].
+      apply congm_sym; auto. }
   - intros H. induction H.
     + apply cong_E1; auto.
     + apply cong_E2; auto.
@@ -5299,10 +5436,7 @@ Proof.
   rewrite <- links_flatten. reflexivity.
 Qed.
 
-Lemma mult_cons : forall x l y,
-  multiplicity (list_to_multiset (x :: l)) y
-  = (if Leq_dec x y then 1 else 0) + multiplicity (list_to_multiset l) y.
-Proof. reflexivity. Qed.
+(* [mult_cons] is now defined earlier, alongside [cong]/[congm]. *)
 
 Lemma mult_rename_eq : forall (r : Link -> Link) ll X0,
   (forall x, In x ll -> r x = r X0 -> x = X0) ->
