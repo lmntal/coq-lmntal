@@ -752,28 +752,40 @@ Proof.
     apply H.
 Qed.
 
-Reserved Notation "p '==m' q" (at level 40).
-Inductive congm : Term -> Term -> Prop :=
-  | congm_E1 : forall P, wellformed_t P ->
-                {{TZero, P}} ==m P
-  | congm_E2 : forall P Q, wellformed_t {{P, Q}} ->
-                {{P, Q}} ==m {{Q, P}}
-  | congm_E3 : forall P Q R, wellformed_t {{P, (Q, R)}} -> 
-                {{P, (Q, R)}} ==m {{(P, Q), R}}
-  | congm_E5 : forall P P' Q, wellformed_t {{ P,Q }} -> wellformed_t {{ P',Q }} ->
-                P ==m P' -> {{ P,Q }} ==m {{ P',Q }}
-  | congm_E7 : forall X, {{ X = X }} ==m TZero
-  | congm_E9 : forall X Y (A:Atom), 
-                wellformed_t {{ X = Y, A }} -> wellformed_t {{ A[Y/X] }} ->
-                In X (freelinks A) ->
-                {{ X = Y, A }} ==m {{ A[Y/X] }}
-  | congm_refl : forall P, wellformed_t P ->
-                  P ==m P
-  | congm_trans : forall P Q R, wellformed_t P -> wellformed_t Q -> wellformed_t R ->
-    P ==m Q -> Q ==m R -> P ==m R
-  | congm_sym : forall P Q, wellformed_t P -> wellformed_t Q -> 
-    P ==m Q -> Q ==m P
-  where "p '==m' q" := (congm p q).
+Definition congm (P Q : Term) : Prop := cclose congm_step P Q.
+Notation "p '==m' q" := (congm p q) (at level 40).
+
+Lemma congm_E1 : forall P, wellformed_t P -> {{TZero, P}} ==m P.
+Proof. intros P H. apply cc_step; [ apply wf_mol_TZero_l | | apply ms_E1 ]; auto. Qed.
+
+Lemma congm_E2 : forall P Q, wellformed_t {{P, Q}} -> {{P, Q}} ==m {{Q, P}}.
+Proof. intros P Q H. apply cc_step; [ | apply wf_mol_comm | apply ms_E2 ]; auto. Qed.
+
+Lemma congm_E3 : forall P Q R, wellformed_t {{P, (Q, R)}} -> {{P, (Q, R)}} ==m {{(P, Q), R}}.
+Proof. intros P Q R H. apply cc_step; [ | apply wf_mol_assoc | apply ms_E3 ]; auto. Qed.
+
+Lemma congm_E5 : forall P P' Q, wellformed_t {{ P,Q }} -> wellformed_t {{ P',Q }} ->
+              P ==m P' -> {{ P,Q }} ==m {{ P',Q }}.
+Proof. intros P P' Q H1 H2 H3. apply cc_ctxt; auto. Qed.
+
+Lemma congm_E7 : forall X, {{ X = X }} ==m TZero.
+Proof. intros X. apply cc_step; [ apply wf_selfconn | apply wf_TZero | apply ms_E7 ]. Qed.
+
+Lemma congm_E9 : forall X Y (A:Atom),
+              wellformed_t {{ X = Y, A }} -> wellformed_t {{ A[Y/X] }} ->
+              In X (freelinks A) -> {{ X = Y, A }} ==m {{ A[Y/X] }}.
+Proof. intros X Y A H1 H2 H3. apply cc_step; auto. apply ms_E9; auto. Qed.
+
+Lemma congm_refl : forall P, wellformed_t P -> P ==m P.
+Proof. intros P H. apply cc_refl; auto. Qed.
+
+Lemma congm_trans : forall P Q R, wellformed_t P -> wellformed_t Q -> wellformed_t R ->
+  P ==m Q -> Q ==m R -> P ==m R.
+Proof. intros P Q R _ _ _ H1 H2. apply cc_trans with Q; auto. Qed.
+
+Lemma congm_sym : forall P Q, wellformed_t P -> wellformed_t Q ->
+  P ==m Q -> Q ==m P.
+Proof. intros P Q _ _ H. apply cc_sym; auto. Qed.
 
 Lemma in_freelinks:
   forall X P, In X (freelinks P) <-> multiplicity (link_multiset P) X = 1.
@@ -1898,14 +1910,17 @@ Lemma congm_wellformed_t:
   forall P Q, P ==m Q -> wellformed_t P /\ wellformed_t Q.
 Proof.
   intros P Q H.
-  induction H; auto; split; auto.
-  - apply wellformed_t_link_multiset with {{P,Q}}; auto.
-    apply link_multiset_swap.
-  - apply wellformed_t_link_multiset with {{P,(Q,R)}}; auto.
-    apply link_multiset_assoc.
-  - apply connector_wellformed_t.
-  - unfold wellformed_t.
-    simpl. auto.
+  induction H as
+    [ P Q HwP HwQ Hstep
+    | P P' Q Hw1 Hw2 H IH
+    | P Hw
+    | P Q R H1 IH1 H2 IH2
+    | P Q H IH ].
+  - split; assumption.
+  - split; assumption.
+  - split; assumption.
+  - destruct IH1 as [HP HQ]. destruct IH2 as [_ HR]. split; assumption.
+  - destruct IH as [HP HQ]. split; assumption.
 Qed.
 
 Lemma subst_inv:
@@ -2113,16 +2128,25 @@ Proof.
       apply congm_trans with Q; auto. }
     { destruct (cong_wellformed_t _ _ H) as [HwfP HwfQ].
       apply congm_sym; auto. }
-  - intros H. induction H.
-    + apply cong_E1; auto.
-    + apply cong_E2; auto.
-    + apply cong_E3; auto.
-    + apply cong_E5; auto.
-    + apply cong_E7; auto.
-    + apply cong_E9; auto.
-    + apply cong_refl; auto.
-    + apply cong_trans with Q; auto.
-    + apply cong_sym; auto.
+  - intros H. induction H as
+      [ P Q HwP HwQ Hstep
+      | P P' Q Hw1 Hw2 H IH
+      | P Hw
+      | P Q R H1 IH1 H2 IH2
+      | P Q H IH ].
+    { destruct Hstep as [ P0 | P0 Q0 | P0 Q0 R0 | X0 | X0 Y0 A0 Hfr ].
+      { apply cong_E1; auto. }
+      { apply cong_E2; auto. }
+      { apply cong_E3; auto. }
+      { apply cong_E7; auto. }
+      { apply cong_E9; auto. } }
+    { apply cong_E5; auto. }
+    { apply cong_refl; auto. }
+    { destruct (congm_wellformed_t _ _ H1) as [HwfP HwfQ].
+      destruct (congm_wellformed_t _ _ H2) as [_ HwfR].
+      apply cong_trans with Q; auto. }
+    { destruct (congm_wellformed_t _ _ H) as [HwfP HwfQ].
+      apply cong_sym; auto. }
 Qed.
 
 (* For SC-GI Correspondence *)
@@ -2668,7 +2692,6 @@ Qed.
 (*  e.g. on  {{X=Y, Y=Z, p(X,Z)}}  vs  {{p(X,Z), Y=Z, X=Y}}).         *)
 (* ================================================================== *)
 
-Require Import Lia.
 Require Import Relation_Operators.
 
 (* --- Def 3 : closed / normal terms -------------------------------- *)
@@ -3234,43 +3257,49 @@ Lemma congm_mult1_iff : forall P Q,
   forall L, multiplicity (link_multiset P) L = 1
         <-> multiplicity (link_multiset Q) L = 1.
 Proof.
-  intros P Q H. induction H; intros L.
-  - (* E1 *) rewrite link_multiset_TZero_l. reflexivity.
-  - (* E2 *) rewrite (link_multiset_swap P Q L). reflexivity.
-  - (* E3 *) rewrite (link_multiset_assoc P Q R L). reflexivity.
+  intros P Q H. induction H as
+    [ P Q HwP HwQ Hstep
+    | P P' Q Hw1 Hw2 H IH
+    | P Hw
+    | P Q R H1 IH1 H2 IH2
+    | P Q H IH ]; intros L.
+  - (* E1,E2,E3,E7,E9 *)
+    destruct Hstep as [ P0 | P0 Q0 | P0 Q0 R0 | X0 | X0 Y0 A0 Hfr ].
+    + (* E1 *) rewrite link_multiset_TZero_l. reflexivity.
+    + (* E2 *) rewrite (link_multiset_swap P0 Q0 L). reflexivity.
+    + (* E3 *) rewrite (link_multiset_assoc P0 Q0 R0 L). reflexivity.
+    + (* E7 *)
+      rewrite multiplicity_TZero, multiplicity_TAtom_AConn.
+      destruct (Leq_dec X0 L); simpl; split; intros K; lia.
+    + (* E9 *)
+      assert (Hm1 : multiplicity (link_multiset (TAtom A0)) X0 = 1)
+        by (apply in_freelinks; exact Hfr).
+      assert (Hxy : X0 <> Y0).
+      { intro E. subst Y0.
+        assert (Hle := wellformed_t_mult_le _ X0 HwP).
+        rewrite multiplicity_mol, multiplicity_TAtom_AConn, Leq_dec_refl in Hle.
+        simpl in Hle. lia. }
+      rewrite multiplicity_mol, multiplicity_TAtom_AConn.
+      destruct (Leq_dec X0 L) as [EX|EX].
+      * subst L. rewrite (subst_multiplicity_X (TAtom A0) X0 Y0 Hxy).
+        destruct (Leq_dec Y0 X0); [ congruence |].
+        simpl. rewrite Hm1. split; intros K; lia.
+      * destruct (Leq_dec Y0 L) as [EY|EY].
+        -- subst L. rewrite (subst_multiplicity_Y (TAtom A0) X0 Y0 Hxy).
+           rewrite Hm1. simpl. split; intros K; lia.
+        -- rewrite (subst_multiplicity_other (TAtom A0) X0 Y0 L EX EY).
+           simpl. reflexivity.
   - (* E5 : {{P,Q}} ==m {{P',Q}} from P ==m P' *)
     rewrite !multiplicity_mol.
     apply sum1_iff.
-    + assert (Hle := wellformed_t_mult_le _ L H).
+    + assert (Hle := wellformed_t_mult_le _ L Hw1).
       rewrite multiplicity_mol in Hle. exact Hle.
-    + assert (Hle := wellformed_t_mult_le _ L H0).
+    + assert (Hle := wellformed_t_mult_le _ L Hw2).
       rewrite multiplicity_mol in Hle. exact Hle.
-    + apply IHcongm.
-  - (* E7 : {{X=X}} ==m TZero *)
-    rewrite multiplicity_TZero, multiplicity_TAtom_AConn.
-    destruct (Leq_dec X L); simpl; split; intros K; lia.
-  - (* E9 : {{X=Y,A}} ==m {{A[Y/X]}} *)
-    rename H into WF1. rename H0 into WF2. rename H1 into HXA.
-    assert (Hm1 : multiplicity (link_multiset (TAtom A)) X = 1)
-      by (apply in_freelinks; exact HXA).
-    assert (Hxy : X <> Y).
-    { intro E. subst Y.
-      assert (Hle := wellformed_t_mult_le _ X WF1).
-      rewrite multiplicity_mol, multiplicity_TAtom_AConn, Leq_dec_refl in Hle.
-      simpl in Hle. lia. }
-    rewrite multiplicity_mol, multiplicity_TAtom_AConn.
-    destruct (Leq_dec X L) as [EX|EX].
-    + subst L. rewrite (subst_multiplicity_X (TAtom A) X Y Hxy).
-      destruct (Leq_dec Y X); [ congruence |].
-      simpl. rewrite Hm1. split; intros K; lia.
-    + destruct (Leq_dec Y L) as [EY|EY].
-      * subst L. rewrite (subst_multiplicity_Y (TAtom A) X Y Hxy).
-        rewrite Hm1. simpl. split; intros K; lia.
-      * rewrite (subst_multiplicity_other (TAtom A) X Y L EX EY).
-        simpl. reflexivity.
+    + apply IH.
   - (* refl *) reflexivity.
-  - (* trans *) rewrite IHcongm1. apply IHcongm2.
-  - (* sym *) symmetry. apply IHcongm.
+  - (* trans *) rewrite IH1. apply IH2.
+  - (* sym *) symmetry. apply IH.
 Qed.
 
 Lemma congm_Closed : forall P Q, P ==m Q -> (Closed P <-> Closed Q).
@@ -3633,17 +3662,23 @@ Proof. intros P Q. unfold aatom_shapes. simpl. apply flat_map_app. Qed.
 Lemma congm_shapes : forall P Q, P ==m Q ->
   Permutation (aatom_shapes P) (aatom_shapes Q).
 Proof.
-  intros P Q H. induction H.
-  - (* E1 *) unfold aatom_shapes; simpl. apply Permutation_refl.
-  - (* E2 *) rewrite !aatom_shapes_mol. apply Permutation_app_comm.
-  - (* E3 *) rewrite !aatom_shapes_mol, app_assoc. apply Permutation_refl.
-  - (* E5 *) rewrite !aatom_shapes_mol. apply Permutation_app_tail. exact IHcongm.
-  - (* E7 *) unfold aatom_shapes; simpl. apply Permutation_refl.
-  - (* E9 *) unfold aatom_shapes; simpl.
-    destruct A as [p ls|u v]; simpl; rewrite ?length_map; apply Permutation_refl.
+  intros P Q H. induction H as
+    [ P Q HwP HwQ Hstep
+    | P P' Q Hw1 Hw2 H IH
+    | P Hw
+    | P Q R H1 IH1 H2 IH2
+    | P Q H IH ].
+  - destruct Hstep as [ P0 | P0 Q0 | P0 Q0 R0 | X0 | X0 Y0 A0 Hfr ].
+    + (* E1 *) unfold aatom_shapes; simpl. apply Permutation_refl.
+    + (* E2 *) rewrite !aatom_shapes_mol. apply Permutation_app_comm.
+    + (* E3 *) rewrite !aatom_shapes_mol, app_assoc. apply Permutation_refl.
+    + (* E7 *) unfold aatom_shapes; simpl. apply Permutation_refl.
+    + (* E9 *) unfold aatom_shapes; simpl.
+      destruct A0 as [p ls|u v]; simpl; rewrite ?length_map; apply Permutation_refl.
+  - (* E5 *) rewrite !aatom_shapes_mol. apply Permutation_app_tail. exact IH.
   - (* refl *) apply Permutation_refl.
   - (* trans *) eapply Permutation_trans; eassumption.
-  - (* sym *) apply Permutation_sym. exact IHcongm.
+  - (* sym *) apply Permutation_sym. exact IH.
 Qed.
 
 (* ================================================================== *)
@@ -4783,21 +4818,84 @@ Qed.
 
 Theorem congm_giso : forall P Q, P ==m Q -> giso (freelinks P) P Q.
 Proof.
-  intros P Q H. induction H.
-  - (* E1 : {{TZero, P}} ==m P *)
-    apply giso_eq.
-    + rewrite node_atoms_mol. reflexivity.
-    + rewrite term_conns_mol. reflexivity.
-  - (* E2 : {{P, Q}} ==m {{Q, P}} *)
-    apply giso_app_comm.
-  - (* E3 : {{P, (Q, R)}} ==m {{(P, Q), R}} *)
-    apply giso_eq.
-    + rewrite !node_atoms_mol, app_assoc. reflexivity.
-    + rewrite !term_conns_mol, app_assoc. reflexivity.
+  intros P Q H. induction H as
+    [ P Q HwP HwQ Hstep
+    | P P' Q Hw1 Hw2 H IH
+    | P Hw
+    | P Q R H1 IH1 H2 IH2
+    | P Q H IH ].
+  - (* E1,E2,E3,E7,E9 *)
+    destruct Hstep as [ P0 | P0 Q0 | P0 Q0 R0 | X0 | X0 Y0 A0 Hfr ].
+    + (* E1 : {{TZero, P0}} ==m P0 *)
+      apply giso_eq.
+      * rewrite node_atoms_mol. reflexivity.
+      * rewrite term_conns_mol. reflexivity.
+    + (* E2 : {{P0, Q0}} ==m {{Q0, P0}} *)
+      apply giso_app_comm.
+    + (* E3 : {{P0, (Q0, R0)}} ==m {{(P0, Q0), R0}} *)
+      apply giso_eq.
+      * rewrite !node_atoms_mol, app_assoc. reflexivity.
+      * rewrite !term_conns_mol, app_assoc. reflexivity.
+    + (* E7 : {{X0 = X0}} ==m TZero *)
+      apply giso_trivial.
+      * reflexivity.
+      * reflexivity.
+      * apply nil_iff_forall_not_in. intros Z. rewrite in_freelinks.
+        rewrite multiplicity_TAtom_AConn.
+        destruct (Leq_dec X0 Z); simpl; lia.
+    + (* E9 : {{X0 = Y0, A0}} ==m {{A0 [Y0/X0]}} *)
+      assert (HYX : Y0 <> X0) by (apply not_eq_sym, (E9_neq X0 Y0 A0 HwP Hfr)).
+      assert (HmX : multiplicity (link_multiset (TAtom A0)) X0 = 1)
+        by (apply in_freelinks, Hfr).
+      assert (HXnf : ~ In X0 (freelinks (TMol (TAtom (AConn X0 Y0)) (TAtom A0)))).
+      { rewrite in_freelinks, multiplicity_mol, multiplicity_TAtom_AConn, Leq_dec_refl.
+        destruct (Leq_dec Y0 X0); [ congruence |]. rewrite HmX. simpl. lia. }
+      exists (fun i => i), (fun i => i).
+      split; [ auto | split; [ auto |]].
+      split; [ rewrite node_atoms_E9_lhs, node_atoms_subst_atom, length_map; cbn; auto |].
+      split; [ rewrite node_atoms_E9_lhs, node_atoms_subst_atom, length_map; cbn; auto |].
+      split.
+      { (* gi_funct *)
+        intros i. rewrite node_atoms_E9_lhs.
+        rewrite node_atoms_subst_atom, nth_error_map.
+        destruct (nth_error (node_atoms (TAtom A0)) i) as [a|]; simpl; auto.
+        f_equal. symmetry. apply get_functor_map_atom. }
+      split.
+      { (* gi_conn *)
+        intros i k j l Xik Xjl Yik Yjl HP1 HP2 HP3 HP4.
+        rewrite node_atoms_E9_lhs in HP1, HP2.
+        rewrite node_atoms_subst_atom, portlink_map in HP3, HP4.
+        rewrite HP1 in HP3. rewrite HP2 in HP4. simpl in HP3, HP4.
+        injection HP3 as HY3. injection HP4 as HY4. subst Yik Yjl.
+        rewrite term_conns_E9_lhs, term_conns_subst_atom.
+        apply edge_eq_collapse. exact HYX. }
+      split.
+      { (* gi_iface *)
+        intros i k Z Xik Yik HZ HP1 HP2.
+        rewrite node_atoms_E9_lhs in HP1.
+        rewrite node_atoms_subst_atom, portlink_map in HP2.
+        rewrite HP1 in HP2. simpl in HP2. injection HP2 as HY2. subst Yik.
+        rewrite term_conns_E9_lhs, term_conns_subst_atom.
+        assert (HZX : Z <> X0) by (intros ->; apply HXnf; exact HZ).
+        assert (HsZ : substitute_link Y0 X0 Z = Z)
+          by (unfold substitute_link; apply eqb_neq in HZX; rewrite HZX; reflexivity).
+        rewrite <- HsZ at 2.
+        apply edge_eq_collapse. exact HYX. }
+      { (* gi_ff *)
+        intros Z W HZ HW.
+        rewrite term_conns_E9_lhs, term_conns_subst_atom.
+        assert (HZX : Z <> X0) by (intros ->; apply HXnf; exact HZ).
+        assert (HWX : W <> X0) by (intros ->; apply HXnf; exact HW).
+        assert (HsZ : substitute_link Y0 X0 Z = Z)
+          by (unfold substitute_link; apply eqb_neq in HZX; rewrite HZX; reflexivity).
+        assert (HsW : substitute_link Y0 X0 W = W)
+          by (unfold substitute_link; apply eqb_neq in HWX; rewrite HWX; reflexivity).
+        rewrite <- HsZ at 2. rewrite <- HsW at 2.
+        apply edge_eq_collapse. exact HYX. }
   - (* E5 : {{P, Q}} ==m {{P', Q}}  from  P ==m P' *)
-    rename H into WFPQ. rename H0 into WFP'Q. rename H1 into HPP'.
-    pose proof IHcongm as IHc2.
-    destruct IHcongm as
+    rename Hw1 into WFPQ. rename Hw2 into WFP'Q. rename H into HPP'.
+    pose proof IH as IHc2.
+    destruct IH as
       (f & g & Hgf & Hfg & Hdom & Hcod & Hfun & Hconn & Hifc & Hff).
     assert (Hfleq := congm_freelinks P P' HPP').
     assert (Hcl : giso_clauses f P P').
@@ -4899,73 +4997,16 @@ Proof.
         as (HsW & HsW' & HWP & HWP').
       exact (E5_edge_iff f g P P' Q WFPQ WFP'Q Hcl Hclg
                Z W Z W HZP HWP HZP' HWP' HsZ HsW HsZ' HsW'). }
-  - (* E7 : {{X = X}} ==m TZero *)
-    apply giso_trivial.
-    + reflexivity.
-    + reflexivity.
-    + apply nil_iff_forall_not_in. intros Z. rewrite in_freelinks.
-      rewrite multiplicity_TAtom_AConn.
-      destruct (Leq_dec X Z); simpl; lia.
-  - (* E9 : {{X = Y, A}} ==m {{A [Y/X]}} *)
-    rename H into WF1. rename H0 into WF2. rename H1 into HXA.
-    assert (HYX : Y <> X) by (apply not_eq_sym, (E9_neq X Y A WF1 HXA)).
-    assert (HmX : multiplicity (link_multiset (TAtom A)) X = 1)
-      by (apply in_freelinks, HXA).
-    assert (HXnf : ~ In X (freelinks (TMol (TAtom (AConn X Y)) (TAtom A)))).
-    { rewrite in_freelinks, multiplicity_mol, multiplicity_TAtom_AConn, Leq_dec_refl.
-      destruct (Leq_dec Y X); [ congruence |]. rewrite HmX. simpl. lia. }
-    exists (fun i => i), (fun i => i).
-    split; [ auto | split; [ auto |]].
-    split; [ rewrite node_atoms_E9_lhs, node_atoms_subst_atom, length_map; cbn; auto |].
-    split; [ rewrite node_atoms_E9_lhs, node_atoms_subst_atom, length_map; cbn; auto |].
-    split.
-    { (* gi_funct *)
-      intros i. rewrite node_atoms_E9_lhs.
-      rewrite node_atoms_subst_atom, nth_error_map.
-      destruct (nth_error (node_atoms (TAtom A)) i) as [a|]; simpl; auto.
-      f_equal. symmetry. apply get_functor_map_atom. }
-    split.
-    { (* gi_conn *)
-      intros i k j l Xik Xjl Yik Yjl HP1 HP2 HP3 HP4.
-      rewrite node_atoms_E9_lhs in HP1, HP2.
-      rewrite node_atoms_subst_atom, portlink_map in HP3, HP4.
-      rewrite HP1 in HP3. rewrite HP2 in HP4. simpl in HP3, HP4.
-      injection HP3 as HY3. injection HP4 as HY4. subst Yik Yjl.
-      rewrite term_conns_E9_lhs, term_conns_subst_atom.
-      apply edge_eq_collapse. exact HYX. }
-    split.
-    { (* gi_iface *)
-      intros i k Z Xik Yik HZ HP1 HP2.
-      rewrite node_atoms_E9_lhs in HP1.
-      rewrite node_atoms_subst_atom, portlink_map in HP2.
-      rewrite HP1 in HP2. simpl in HP2. injection HP2 as HY2. subst Yik.
-      rewrite term_conns_E9_lhs, term_conns_subst_atom.
-      assert (HZX : Z <> X) by (intros ->; apply HXnf; exact HZ).
-      assert (HsZ : substitute_link Y X Z = Z)
-        by (unfold substitute_link; apply eqb_neq in HZX; rewrite HZX; reflexivity).
-      rewrite <- HsZ at 2.
-      apply edge_eq_collapse. exact HYX. }
-    { (* gi_ff *)
-      intros Z W HZ HW.
-      rewrite term_conns_E9_lhs, term_conns_subst_atom.
-      assert (HZX : Z <> X) by (intros ->; apply HXnf; exact HZ).
-      assert (HWX : W <> X) by (intros ->; apply HXnf; exact HW).
-      assert (HsZ : substitute_link Y X Z = Z)
-        by (unfold substitute_link; apply eqb_neq in HZX; rewrite HZX; reflexivity).
-      assert (HsW : substitute_link Y X W = W)
-        by (unfold substitute_link; apply eqb_neq in HWX; rewrite HWX; reflexivity).
-      rewrite <- HsZ at 2. rewrite <- HsW at 2.
-      apply edge_eq_collapse. exact HYX. }
   - (* refl *)
     apply giso_refl.
   - (* trans : P ==m Q, Q ==m R *)
-    apply giso_trans with Q; [ exact IHcongm1 |].
-    apply giso_iface_ext with (freelinks Q); [ | exact IHcongm2 ].
+    apply giso_trans with Q; [ exact IH1 |].
+    apply giso_iface_ext with (freelinks Q); [ | exact IH2 ].
     intros X. symmetry. apply (congm_freelinks P Q); assumption.
   - (* sym : P ==m Q *)
     apply giso_iface_ext with (freelinks P).
     + intros X. apply (congm_freelinks P Q); assumption.
-    + apply giso_sym. exact IHcongm.
+    + apply giso_sym. exact IH.
 Qed.
 
 (* Structural congruence implies interface-preserving graph isomorphism. *)
