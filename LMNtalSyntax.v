@@ -6882,3 +6882,213 @@ Proof.
 Qed.
 
 End FreelinksHypNecessary.
+
+(* ================================================================== *)
+(*  Sanity check: [giso] on connector-free terms really is graph        *)
+(*  isomorphism in the textbook sense -- a bijective link renaming      *)
+(*  (fixing the interface, injective on the term's own links) that      *)
+(*  turns the atom multiset of one term into the atom multiset of the   *)
+(*  other.  This does not depend on [giso] or on any lemma from the     *)
+(*  forward/reverse SC-GI development beyond what was already needed    *)
+(*  there ([phi], [phi_perm], etc., for the forward half); the reverse  *)
+(*  half (rename+permutation implies giso) is new and independent of    *)
+(*  the rest of the development, giving an external check that [giso]   *)
+(*  is not accidentally too permissive on connector-free terms.  (The   *)
+(*  connector part of a general [giso] is comparatively easy to trust   *)
+(*  on its own terms: [edge_eq_matching] already shows it is exactly a  *)
+(*  set of unordered pairs, i.e. literally an edge set.)                *)
+(* ================================================================== *)
+
+Lemma injective_bounded_inverse : forall (h : nat -> nat) (n : nat),
+  (forall x y, x < n -> y < n -> h x = h y -> x = y) ->
+  (forall i, i < n -> h i < n) ->
+  exists g : nat -> nat,
+    (forall i, i < n -> g (h i) = i) /\
+    (forall j, j < n -> h (g j) = j) /\
+    (forall j, j < n -> g j < n).
+Proof.
+  intros h n Hinj Hbound.
+  assert (Hnd : NoDup (map h (seq 0 n))).
+  { apply NoDup_map_NoDup_ForallPairs; [| apply seq_NoDup].
+    intros a b Ha Hb Hab. apply in_seq in Ha. apply in_seq in Hb.
+    apply Hinj; [lia|lia|exact Hab]. }
+  assert (Hincl : incl (map h (seq 0 n)) (seq 0 n)).
+  { intros x Hx. apply in_map_iff in Hx. destruct Hx as [i [<- Hi]].
+    apply in_seq in Hi. apply in_seq. split; [lia|]. simpl.
+    apply Hbound. lia. }
+  assert (Hperm : Permutation (map h (seq 0 n)) (seq 0 n)).
+  { apply NoDup_Permutation_bis; [exact Hnd | | exact Hincl].
+    rewrite length_map, !length_seq. lia. }
+  apply Permutation_nth_error in Hperm.
+  destruct Hperm as [Hlen [k [Hkinj Hk]]].
+  exists k.
+  assert (Hspec : forall m, nth_error (seq 0 n) m = if Nat.ltb m n then Some m else None).
+  { intros m. rewrite nth_error_seq. reflexivity. }
+  assert (Hkbound : forall m, m < n -> k m < n).
+  { intros m Hm. specialize (Hk m). rewrite (Hspec m) in Hk.
+    destruct (Nat.ltb m n) eqn:E; [| apply PeanoNat.Nat.ltb_ge in E; lia].
+    destruct (Nat.ltb (k m) n) eqn:E2.
+    - apply PeanoNat.Nat.ltb_lt in E2. exact E2.
+    - exfalso. rewrite nth_error_map in Hk.
+      apply PeanoNat.Nat.ltb_ge in E2.
+      rewrite (proj2 (nth_error_None (seq 0 n) (k m))) in Hk; [discriminate | rewrite length_seq; lia]. }
+  assert (Hheq : forall m, m < n -> h (k m) = m).
+  { intros m Hm. specialize (Hk m). rewrite (Hspec m) in Hk.
+    destruct (Nat.ltb m n) eqn:E; [| apply PeanoNat.Nat.ltb_ge in E; lia].
+    rewrite nth_error_map in Hk.
+    assert (Hkm := Hkbound m Hm).
+    rewrite (Hspec (k m)) in Hk.
+    destruct (Nat.ltb (k m) n) eqn:E2; [| apply PeanoNat.Nat.ltb_ge in E2; lia].
+    simpl in Hk. injection Hk as Hk. symmetry. exact Hk. }
+  split.
+  { intros i Hi.
+    assert (Hb := Hbound i Hi).
+    assert (Hgoal := Hheq (h i) Hb).
+    apply (Hinj (k (h i)) i); [ apply Hkbound; exact Hb | exact Hi |].
+    rewrite Hgoal. reflexivity. }
+  split.
+  { intros j Hj. apply Hheq. exact Hj. }
+  { intros j Hj. apply Hkbound. exact Hj. }
+Qed.
+
+Theorem giso_cf_iff_rename : forall P Q,
+  connector_free P -> connector_free Q ->
+  (giso (freelinks P) P Q <->
+   exists rho : Link -> Link,
+     (forall X, In X (freelinks P) -> rho X = X) /\
+     (forall X X', In X (links P) -> In X' (links P) -> rho X = rho X' -> X = X') /\
+     Permutation (map (map_atom rho) (flatten_atoms P)) (flatten_atoms Q)).
+Proof.
+  intros P Q HcfP HcfQ. split.
+  - intro Hgiso.
+    assert (HtcP := term_conns_cf P HcfP).
+    assert (HtcQ := term_conns_cf Q HcfQ).
+    assert (Hlen := giso_node_len (freelinks P) P Q Hgiso).
+    destruct Hgiso as (f & g & Hgf & Hfg & Hdom & Hcod & Hfun & Hconn & Hifc & Hff).
+    exists (phi f P Q Hfun Hconn HtcP HtcQ).
+    split; [ apply (phi_free_id f P Q Hfun Hconn HtcP HtcQ HcfP HcfQ Hifc) |].
+    split; [ apply (phi_inj f P Q Hfun Hconn HtcP HtcQ HcfP HcfQ) |].
+    apply (phi_perm f g P Q Hfun Hconn HtcP HtcQ Hfg Hcod Hdom HcfP HcfQ Hlen).
+  - intros [rho [Hrho_free [Hrho_inj Hperm]]].
+    assert (HnaP := node_atoms_cf P HcfP).
+    assert (HnaQ := node_atoms_cf Q HcfQ).
+    assert (HtcP := term_conns_cf P HcfP).
+    assert (HtcQ := term_conns_cf Q HcfQ).
+    rewrite <- HnaP, <- HnaQ in Hperm.
+    apply Permutation_nth_error in Hperm.
+    destruct Hperm as [Hlen0 [h [Hhinj Hh]]].
+    rewrite length_map in Hlen0.
+    set (len := length (node_atoms P)).
+    assert (Hlen : len = length (node_atoms Q)) by exact Hlen0.
+    assert (Hbound : forall i, i < len -> h i < len).
+    { intros i Hi. destruct (Nat.ltb (h i) len) eqn:E.
+      - apply PeanoNat.Nat.ltb_lt in E. exact E.
+      - apply PeanoNat.Nat.ltb_ge in E.
+        specialize (Hh i). rewrite nth_error_map in Hh.
+        rewrite (proj2 (nth_error_None (node_atoms P) (h i))) in Hh; [| lia].
+        simpl in Hh.
+        assert (Hi' : i < length (node_atoms Q)) by lia.
+        apply nth_error_Some in Hi'. exfalso. apply Hi'. exact Hh. }
+    destruct (injective_bounded_inverse h len (fun x y _ _ => Hhinj x y) Hbound)
+      as (g0 & Hg0h & Hhg0 & Hg0bound).
+    set (F := fext len g0). set (G := fext len h).
+    assert (HFG : forall i, G (F i) = i).
+    { intros i. destruct (Nat.ltb i len) eqn:E.
+      - apply PeanoNat.Nat.ltb_lt in E.
+        unfold F. rewrite (fext_lo len g0 i E).
+        assert (Hb := Hg0bound i E).
+        unfold G. rewrite (fext_lo len h (g0 i) Hb).
+        apply Hhg0. exact E.
+      - apply PeanoNat.Nat.ltb_ge in E.
+        unfold F. rewrite (fext_hi len g0 i E).
+        unfold G. rewrite (fext_hi len h i E). reflexivity. }
+    assert (HGF : forall i, F (G i) = i).
+    { intros i. destruct (Nat.ltb i len) eqn:E.
+      - apply PeanoNat.Nat.ltb_lt in E.
+        unfold G. rewrite (fext_lo len h i E).
+        assert (Hb := Hbound i E).
+        unfold F. rewrite (fext_lo len g0 (h i) Hb).
+        apply Hg0h. exact E.
+      - apply PeanoNat.Nat.ltb_ge in E.
+        unfold G. rewrite (fext_hi len h i E).
+        unfold F. rewrite (fext_hi len g0 i E). reflexivity. }
+    assert (HFbound : forall i, i < len -> F i < len).
+    { intros i Hi. unfold F. rewrite (fext_lo len g0 i Hi). apply Hg0bound. exact Hi. }
+    assert (HGbound : forall j, j < len -> G j < len).
+    { intros j Hj. unfold G. rewrite (fext_lo len h j Hj). apply Hbound. exact Hj. }
+    assert (Hcorr : forall i, i < len ->
+              nth_error (node_atoms Q) (F i) = option_map (map_atom rho) (nth_error (node_atoms P) i)).
+    { intros i Hi.
+      assert (HFi := HFbound i Hi).
+      specialize (Hh (F i)). rewrite nth_error_map in Hh.
+      assert (HhF : h (F i) = i) by (unfold F; rewrite (fext_lo len g0 i Hi); apply Hhg0; exact Hi).
+      rewrite HhF in Hh. exact Hh. }
+    assert (HinP : forall i k X, portlink (node_atoms P) i k = Some X -> In X (links P)).
+    { intros i0 k0 X0 H0. rewrite links_flatten, <- HnaP.
+      eapply In_flat_map_links_portlink; eauto. }
+    exists F, G.
+    split; [ exact HFG |].
+    split; [ exact HGF |].
+    split; [ intros i Hi; rewrite <- Hlen; apply HFbound; lia |].
+    split; [ intros j Hj; apply HGbound; lia |].
+    split.
+    { intros i.
+      destruct (Nat.ltb i len) eqn:E.
+      - apply PeanoNat.Nat.ltb_lt in E.
+        rewrite (Hcorr i E).
+        destruct (nth_error (node_atoms P) i) as [a|] eqn:Ea; simpl; auto.
+        f_equal. symmetry. apply get_functor_map_atom.
+      - apply PeanoNat.Nat.ltb_ge in E.
+        assert (HPi : nth_error (node_atoms P) i = None) by (apply nth_error_None; lia).
+        rewrite HPi. simpl.
+        assert (HFi : F i = i) by (unfold F; apply fext_hi; lia).
+        assert (HQFi : nth_error (node_atoms Q) (F i) = None)
+          by (apply nth_error_None; rewrite HFi; lia).
+        rewrite HQFi. reflexivity. }
+    split.
+    { intros i k j l Xik Xjl Yik Yjl H1 H2 H3 H4.
+      rewrite HtcP, HtcQ, !edge_eq_nil.
+      assert (Hib : i < len)
+        by (unfold portlink in H1; destruct (nth_error (node_atoms P) i) eqn:E;
+              [ apply nth_error_Some; rewrite E; discriminate | discriminate ]).
+      assert (Hjb : j < len)
+        by (unfold portlink in H2; destruct (nth_error (node_atoms P) j) eqn:E;
+              [ apply nth_error_Some; rewrite E; discriminate | discriminate ]).
+      assert (HYik : Yik = rho Xik).
+      { unfold portlink in H1, H3. rewrite (Hcorr i Hib) in H3.
+        destruct (nth_error (node_atoms P) i) as [[p ls|x y]|] eqn:E; try discriminate.
+        simpl in H3. rewrite nth_error_map in H3.
+        destruct (nth_error ls k) as [x0|] eqn:Ek; simpl in H1, H3; try discriminate.
+        inversion H1; inversion H3; subst; reflexivity. }
+      assert (HYjl : Yjl = rho Xjl).
+      { unfold portlink in H2, H4. rewrite (Hcorr j Hjb) in H4.
+        destruct (nth_error (node_atoms P) j) as [[p ls|x y]|] eqn:E; try discriminate.
+        simpl in H4. rewrite nth_error_map in H4.
+        destruct (nth_error ls l) as [x0|] eqn:El; simpl in H2, H4; try discriminate.
+        inversion H2; inversion H4; subst; reflexivity. }
+      subst Yik Yjl.
+      assert (HXikP := HinP i k Xik H1). assert (HXjlP := HinP j l Xjl H2).
+      split.
+      - intro Heq. subst. reflexivity.
+      - apply Hrho_inj; assumption. }
+    split.
+    { intros i k Z Xik Yik HZ H1 H2.
+      rewrite HtcP, HtcQ, !edge_eq_nil.
+      assert (Hib : i < len)
+        by (unfold portlink in H1; destruct (nth_error (node_atoms P) i) eqn:E;
+              [ apply nth_error_Some; rewrite E; discriminate | discriminate ]).
+      assert (HYik : Yik = rho Xik).
+      { unfold portlink in H1, H2. rewrite (Hcorr i Hib) in H2.
+        destruct (nth_error (node_atoms P) i) as [[p ls|x y]|] eqn:E; try discriminate.
+        simpl in H2. rewrite nth_error_map in H2.
+        destruct (nth_error ls k) as [x0|] eqn:Ek; simpl in H1, H2; try discriminate.
+        inversion H1; inversion H2; subst; reflexivity. }
+      subst Yik.
+      assert (HXikP := HinP i k Xik H1).
+      assert (HZP : In Z (links P)) by (apply in_freelinks_In_links; exact HZ).
+      assert (HrhoZ : rho Z = Z) by (apply Hrho_free; exact HZ).
+      split.
+      - intro Heq. subst. exact HrhoZ.
+      - intro Heq. rewrite <- HrhoZ in Heq. apply (Hrho_inj Xik Z HXikP HZP Heq). }
+    { intros Z W HZ HW. rewrite HtcP, HtcQ. reflexivity. }
+Qed.
