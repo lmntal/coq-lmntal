@@ -3396,9 +3396,12 @@ Qed.
 Lemma denote_normalize : forall t, denote (normalize t) = denote t.
 Proof. intro t. unfold denote. apply nf_atoms_normalize. Qed.
 
-(* [fuse_atoms] applies one global renaming [uf conns] to [atoms].
-   [uf] is (provably, TODO) invariant under permutation of [conns];
-   that is what the (E2) case of the correspondence reduces to. *)
+(* [fuse_atoms] applies one global renaming [uf conns] to [atoms]
+   (characterized exactly by [fuse_atoms_uf] below). The correspondence
+   proof does not need [uf] itself to be invariant under permutation of
+   [conns]; the (E2) case is instead handled directly via
+   [fuse_atoms_cong], which shows [normalize] admissible as a sequence of
+   (E9)/(E7) steps regardless of the order [conns] is processed in. *)
 Fixpoint uf (fuel : nat) (conns : list (Link * Link)) : Link -> Link :=
   match fuel with
   | 0 => fun z => z
